@@ -35,7 +35,7 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | --- | --- |
 | 3D Moon globe with LRO LROC WAC imagery | Working (CesiumJS) |
 | 3D Mars globe with Viking MDIM21 imagery | Working (CesiumJS) |
-| 2D Earth map with NASA GIBS Blue Marble, MODIS LST and MODIS AOD overlays | Working (MapLibre) |
+| 2D Earth map with NASA GIBS Blue Marble, ASTER topography, MODIS albedo/LST and MERRA-2 AOD layers | Working (MapLibre) |
 | Real LOLA/MOLA DEM point sampling (0.25°/px, fixed 10 km terrain baseline) | Working — elevation, slope, roughness |
 | DEM-derived global elevation/slope/roughness layers with legends | Working |
 | 16 curated lunar sites, 15 Mars sites | Working |
@@ -43,7 +43,7 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | Adjustable priorities with live re-ranking and explanation | Working |
 | Explainable A–F suitability grades with coverage/confidence and constraints | Working |
 | Earth Twin Mode: live NASA POWER/DEM measurements, top-five terrestrial analogs, dimension grades | Working |
-| Earth dossier: overall best-planet match, eight-factor analog profile, explicit data gaps | Working |
+| Earth dossier: overall best-planet match, eight-factor analog profile, brightness/albedo factors, explicit data gaps | Working |
 | Side-by-side comparison, strong/weak matches, applications, physical mismatches | Working |
 | Dataset registry with provenance, resolution, licensing and limitations | Working |
 | Context imagery at the selected coordinate | Working (NASA tiles drawn client-side) |

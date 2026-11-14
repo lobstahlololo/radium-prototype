@@ -115,12 +115,12 @@ export const MODAL_CONTENT = {
       <ul>
         <li>Planetary elevation, slope and roughness are computed live from 0.25°/px LOLA and MOLA DEMs (~7.6 km and ~14.8 km per pixel at the equator). They are regional, not landing-hazard, measurements.</li>
         <li>Planetary temperature, illumination and ice indices are labelled <em>observed</em>, <em>published model</em>, <em>modelled estimate</em>, <em>inferred</em> or <em>assessment</em>. Every value carries a note and uncertainty where applicable.</li>
-        <li>Earth climate is ${CLIMATE_SOURCE_LABEL}, fetched live; 2 m air temperature is an Earth-side thermal proxy and is flagged as such. Aridity uses a documented Hargreaves ET₀ estimate where the source lacks reference ET. Earth terrain is sampled from Copernicus DEM GLO-90 on a ~10 km grid.</li>
+        <li>Earth climate is ${CLIMATE_SOURCE_LABEL}, fetched live; 2 m air temperature is an Earth-side thermal proxy and is flagged as such. Annual surface albedo is the POWER/MERRA-2 broadband reflectance, used only for the brightness profile. Aridity uses a documented Hargreaves ET₀ estimate where the source lacks reference ET. Earth terrain is sampled from Copernicus DEM GLO-90 on a ~10 km grid.</li>
         <li>Nothing is filled in when a service or dataset is unavailable: the interface states “Data unavailable.” and reduces coverage/confidence.</li>
       </ul>
 
       <h3>7 · Scope and honesty</h3>
-      <p>RADIUM v1 implements a scientifically grounded vertical slice: 16 lunar sites, 15 Mars sites, 34 terrestrial candidates, live Earth measurements, top-five Earth Twin rankings, reverse Earth-to-planet matching, eight-factor Earth profiles, explainable grades and a functioning Earth Twin Mode. It is not a global survey of every possible analog, nor a landing-certification tool. See “Data sources” for provenance and limitations of each product.</p>
+      <p>RADIUM v1 implements a scientifically grounded vertical slice: 16 lunar sites, 15 Mars sites, 34 terrestrial candidates, live Earth measurements, top-five Earth Twin rankings, reverse Earth-to-planet matching, eight-factor Earth profiles, per-site brightness/albedo factors, explainable grades and a functioning Earth Twin Mode. The Earth map includes NASA Blue Marble, ASTER GDEM topography, MODIS land-surface temperature and albedo, and MERRA-2 monthly aerosol layers. It is not a global survey of every possible analog, nor a landing-certification tool. See “Data sources” for provenance and limitations of each product.</p>
       <p class="caveat">${MISSION_CAVEAT}</p>
     </div>`,
 

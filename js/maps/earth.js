@@ -11,8 +11,10 @@ const ESRI = 'https://services.arcgisonline.com/ArcGIS/rest/services';
 const SOURCES = {
   'blue-marble': `${GIBS}/BlueMarble_ShadedRelief_Bathymetry/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg`,
   satellite: `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`,
+  topography: `${GIBS}/ASTER_GDEM_Color_Shaded_Relief/default/GoogleMapsCompatible_Level12/{z}/{y}/{x}.jpeg`,
   lst: `${GIBS}/MODIS_Terra_L3_Land_Surface_Temp_8Day_Day/default/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`,
-  aod: `${GIBS}/MODIS_Terra_Aerosol_Optical_Depth_3km/default/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png`,
+  albedo: `${GIBS}/MODIS_Combined_L3_Black_Sky_Albedo_Daily/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png`,
+  aod: `${GIBS}/MERRA2_Total_Aerosol_Optical_Thickness_550nm_Extinction_Monthly/default/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png`,
   labels: `${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`,
 };
 
@@ -28,16 +30,42 @@ export const EARTH_LAYERS = {
     fallbackTicks: ['−20 °C', '0 °C', '20 °C', '40 °C'],
     fallbackGradient: 'linear-gradient(90deg,#3b0f70,#2c7fb8,#41ab5d,#feb24c,#e31a1c)',
   },
+  albedo: {
+    id: 'albedo',
+    label: 'Surface albedo (brightness)',
+    title: 'MODIS black-sky albedo (daily, 16-day retrieval)',
+    unit: 'fraction',
+    datasetId: 'gibs_albedo',
+    note: 'Directional reflectance at local solar noon from the latest available MODIS 16-day BRDF retrieval. Brighter colours mean more reflected shortwave radiation. Display-only; no numeric extraction from tile colours.',
+    legendUrl: null,
+    fallbackTicks: ['0.0', '0.2', '0.4', '0.6', '0.8'],
+    fallbackGradient: 'linear-gradient(90deg,#08306b,#2171b5,#41ab5d,#fec44f,#fff7bc)',
+  },
   aod: {
     id: 'aod',
-    label: 'Aerosol optical depth',
-    title: 'MODIS aerosol optical depth at 550 nm',
+    label: 'Aerosol optical depth (monthly)',
+    title: 'MERRA-2 monthly aerosol optical depth at 550 nm',
     unit: 'AOD',
     datasetId: 'gibs_aerosol',
-    note: 'Daily MODIS 3 km retrieval, cloud-cleared. Bright desert surfaces produce gaps; display-only, not used in scoring.',
-    legendUrl: 'https://gibs.earthdata.nasa.gov/legends/MODIS_Terra_Aerosol_Optical_Depth_3km_H.svg',
+    note: 'Monthly MERRA-2 reanalysis of aerosol extinction, not a daily satellite retrieval. Continuous global field for context; display-only, not used in scoring.',
+    legendUrl: 'https://gibs.earthdata.nasa.gov/legends/MERRA2_Total_Aerosol_Optical_Thickness_550nm_Extinction_Monthly_H.svg',
     fallbackTicks: ['0.0', '0.5', '1.0', '2.0+'],
-    fallbackGradient: 'linear-gradient(90deg,#2b1a52,#2c7fb8,#7fcdbb,#fec44f,#d7301f)',
+    fallbackGradient: 'linear-gradient(90deg,#f7f4c0,#fdd27f,#f39c4a,#d95f2b,#8c2d19)',
+  },
+};
+
+/** Basemap legends are separate because they describe the base layer, not an overlay. */
+export const EARTH_BASEMAPS = {
+  topography: {
+    id: 'topography',
+    label: 'Topography',
+    title: 'ASTER GDEM color shaded relief',
+    unit: 'relief',
+    datasetId: 'gibs_topography',
+    note: 'Static ASTER Global DEM shaded relief, 30 m native (83°N–83°S). Relief shading is cartographic and display-only; use the Terrain section for numeric elevation, slope and roughness.',
+    legendUrl: null,
+    fallbackTicks: ['low', 'high'],
+    fallbackGradient: 'linear-gradient(90deg,#215d4a,#7f9b63,#b98d5e,#eadcc4,#f8f5ef)',
   },
 };
 
@@ -62,16 +90,20 @@ export class EarthMap {
         sources: {
           bm: { type: 'raster', tiles: [SOURCES['blue-marble']], tileSize: 256, maxzoom: 8, attribution: 'NASA GIBS · Blue Marble' },
           sat: { type: 'raster', tiles: [SOURCES.satellite], tileSize: 256, maxzoom: 8, attribution: 'Imagery © Esri' },
+          topo: { type: 'raster', tiles: [SOURCES.topography], tileSize: 256, maxzoom: 8, attribution: 'NASA GIBS · ASTER GDEM' },
           lst: { type: 'raster', tiles: [SOURCES.lst], tileSize: 256, maxzoom: 7, attribution: 'NASA GIBS · MODIS LST' },
-          aod: { type: 'raster', tiles: [SOURCES.aod], tileSize: 256, maxzoom: 6, attribution: 'NASA GIBS · MODIS AOD' },
+          albedo: { type: 'raster', tiles: [SOURCES.albedo], tileSize: 256, maxzoom: 8, attribution: 'NASA GIBS · MODIS albedo' },
+          aod: { type: 'raster', tiles: [SOURCES.aod], tileSize: 256, maxzoom: 6, attribution: 'NASA GIBS · MERRA-2 AOD' },
           labels: { type: 'raster', tiles: [SOURCES.labels], tileSize: 256, maxzoom: 8, attribution: 'Labels © Esri' },
         },
         layers: [
           { id: 'bg', type: 'background', paint: { 'background-color': '#04070d' } },
           { id: 'base-bm', type: 'raster', source: 'bm', paint: { 'raster-opacity': 1 } },
           { id: 'base-sat', type: 'raster', source: 'sat', layout: { visibility: 'none' } },
+          { id: 'base-topo', type: 'raster', source: 'topo', layout: { visibility: 'none' }, paint: { 'raster-opacity': 1 } },
           { id: 'overlay-lst', type: 'raster', source: 'lst', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.55 } },
-          { id: 'overlay-aod', type: 'raster', source: 'aod', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.6 } },
+          { id: 'overlay-albedo', type: 'raster', source: 'albedo', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.65 } },
+          { id: 'overlay-aod', type: 'raster', source: 'aod', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.7 } },
           { id: 'labels', type: 'raster', source: 'labels', paint: { 'raster-opacity': 0.95 } },
         ],
       },
@@ -135,11 +167,13 @@ export class EarthMap {
     if (!this.map) return;
     this.map.setLayoutProperty('base-bm', 'visibility', kind === 'blue-marble' ? 'visible' : 'none');
     this.map.setLayoutProperty('base-sat', 'visibility', kind === 'satellite' ? 'visible' : 'none');
+    this.map.setLayoutProperty('base-topo', 'visibility', kind === 'topography' ? 'visible' : 'none');
   }
 
   setOverlay(kind) {
     if (!this.map) return;
     this.map.setLayoutProperty('overlay-lst', 'visibility', kind === 'lst' ? 'visible' : 'none');
+    this.map.setLayoutProperty('overlay-albedo', 'visibility', kind === 'albedo' ? 'visible' : 'none');
     this.map.setLayoutProperty('overlay-aod', 'visibility', kind === 'aod' ? 'visible' : 'none');
   }
 

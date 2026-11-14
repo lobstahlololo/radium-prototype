@@ -63,10 +63,10 @@ Context thumbnails are composed client-side from 2×2 or 3×3 tiles centred on t
 
 - **Provider**: NASA Langley Research Center, POWER project (MERRA-2 meteorology; POWER/CERES solar)
 - **Endpoint**: `https://power.larc.nasa.gov/api/temporal/climatology/point`
-- **Variables**: `T2M`, `T2M_MAX`, `T2M_MIN` (°C), `PRECTOTCORR` (mm/day), `ALLSKY_SFC_SW_DWN` (kWh/m²/day)
+- **Variables**: `T2M`, `T2M_MAX`, `T2M_MIN` (°C), `PRECTOTCORR` (mm/day), `ALLSKY_SFC_SW_DWN` (kWh/m²/day), `ALLSKY_SRF_ALB` (fraction)
 - **Period**: 25-year monthly and annual climatology, January 2001 → December 2025 (as returned in the service header)
 - **Resolution**: MERRA-2 meteorology ~0.5° × 0.625°; solar ~1°; interpolated to the requested point
-- **Derived**: annual mean temperature (K), mean monthly diurnal range, annual precipitation, Hargreaves ET₀ estimate (RADIUM-derived, **not** a POWER product), aridity index (P/PET₀), solar fraction (annual mean surface shortwave ÷ 117.6 MJ/m²/day)
+- **Derived**: annual mean temperature (K), mean monthly diurnal range, annual precipitation, Hargreaves ET₀ estimate (RADIUM-derived, **not** a POWER product), aridity index (P/PET₀), solar fraction (annual mean surface shortwave ÷ 117.6 MJ/m²/day), annual surface albedo
 - **Caching**: browser `localStorage`, 7-day TTL, versioned key (`v2`)
 - **Limitations**: reanalysis-based climatology, not a station; 2 m air temperature is a thermal-environment proxy and not equivalent to planetary surface brightness temperature; coarse resolution and smoothed extremes; the Hargreaves ET₀ is an empirical estimate, not a measured flux
 - **Licence**: NASA public domain; POWER attribution and terms of use apply
@@ -101,10 +101,12 @@ A request for `soil_temperature_0cm` returned null values, so RADIUM does **not*
 | --- | --- | --- | --- |
 | `gibs_blue_marble` | `BlueMarble_ShadedRelief_Bathymetry` | 500 m composite | Static composite; relief shading is cartographic |
 | `gibs_lst` | `MODIS_Terra_L3_Land_Surface_Temp_8Day_Day` | 1 km | Latest available 8-day composite; cloud-masked; display-only |
-| `gibs_aerosol` | `MODIS_Terra_Aerosol_Optical_Depth_3km` | 3 km | Daily retrieval; bright-surface gaps; display-only |
+| `gibs_albedo` | `MODIS_Combined_L3_Black_Sky_Albedo_Daily` | 500 m native | 16-day BRDF retrieval; latest available; display-only |
+| `gibs_aerosol` | `MERRA2_Total_Aerosol_Optical_Thickness_550nm_Extinction_Monthly` | ~0.5° | Monthly reanalysis, not a daily retrieval; display-only |
+| `gibs_topography` | `ASTER_GDEM_Color_Shaded_Relief` | 30 m | Static shaded relief, ~83°N–83°S; not a numeric cursor value |
 | `esri_labels` | `World_Boundaries_and_Places` | multi-scale | Cartographic reference only; Esri terms/attribution |
 
-Verified endpoints returned HTTP 200 tiles (Blue Marble, LST at z2 and z5, AOD at z2). Snow-cover and NDVI layer IDs returned HTTP 400 at test time and were therefore **not** shipped.
+Verified endpoints returned HTTP 200 tiles (Blue Marble, ASTER topography, MODIS albedo, LST at z2 and z5, MERRA-2 monthly AOD at z2/z4). The previous daily MODIS AOD layer was replaced because its swath gaps made it a poor global context layer; the current monthly reanalysis is labelled accordingly. The working GIBS legend `MERRA2_Total_Aerosol_Optical_Thickness_550nm_Extinction_Monthly_H.svg` is used. Snow-cover and NDVI layer IDs returned HTTP 400 at test time and were therefore **not** shipped.
 
 Colour legends are loaded from the official GIBS legend SVGs where available, with a fallback ramp. RADIUM does not extract numbers from tile colours.
 
@@ -168,7 +170,7 @@ RADIUM is an independent Space Apps project, not an official NASA product.
 - NASA GIBS Blue Marble, MODIS LST (8-day day) and MODIS AOD tiles returned 200; snow-cover/NDVI IDs returned 400 and were excluded.
 - NASA POWER climatology API returned 200 for Atacama, Death Valley and Svalbard; a full pool build produced 34/34 climate and 34/34 terrain records with no issues.
 - Open-Meteo archive and elevation APIs returned 200 with CORS enabled; the archive endpoint returned HTTP 429 ("Minutely API request limit exceeded") under a 34-site burst, which is why POWER is primary and Open-Meteo is the fallback. Unsupported soil-temperature variables were identified and not used.
-- `npm test`: 22 tests passing (see `docs/METHODOLOGY.md`).
+- `npm test`: 24 tests passing (see `docs/METHODOLOGY.md`).
 - The app was booted against a local server to verify that the shell, mission controls and inspector render with live DEM data; WebGL/Cesium availability depends on the browser and is reported in-app if unavailable.
 
 No validation result here is inferred from a screenshot or assumed; failed or unavailable checks are described as such.

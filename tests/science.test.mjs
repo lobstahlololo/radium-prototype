@@ -6,7 +6,7 @@ import { MISSION_PROFILES, computeSuitability, weightShares, evaluateFactor } fr
 import { comparePair, dimensionSimilarity, rankPlanetMatches, earthFactorGrades, SUBSTRATE_AFFINITY, VOLATILE_AFFINITY, SIMILARITY_DIMENSIONS } from '../js/science/similarity.js';
 import { geometricSolarFraction, effectiveSolar, marsPressureKPa } from '../js/science/solar.js';
 import { DemGrid, sampleRamp } from '../js/science/terrain.js';
-import { summarizeClimate, summarizePowerClimate, terrainFromElevations, toaDailyMJ, terrainSamplePoints } from '../js/data/earth-climate.js';
+import { summarizeClimate, summarizePowerClimate, terrainFromElevations, toaDailyMJ, terrainSamplePoints, brightnessClass } from '../js/data/earth-climate.js';
 import { MOON_SITES } from '../js/data/moon-sites.js';
 import { MARS_SITES } from '../js/data/mars-sites.js';
 
@@ -278,7 +278,7 @@ test('climate summariser converts real ERA5-shaped input without inventing value
 
 test('NASA POWER climatology summariser uses monthly normals without inventing values', () => {
   const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  const p = { T2M: { ANN: 20 }, T2M_MAX: {}, T2M_MIN: {}, PRECTOTCORR: { ANN: 0.5 }, ALLSKY_SFC_SW_DWN: { ANN: 6 } };
+  const p = { T2M: { ANN: 20 }, T2M_MAX: {}, T2M_MIN: {}, PRECTOTCORR: { ANN: 0.5 }, ALLSKY_SFC_SW_DWN: { ANN: 6 }, ALLSKY_SRF_ALB: { ANN: 0.17 } };
   months.forEach((m) => { p.T2M[m] = 20; p.T2M_MAX[m] = 30; p.T2M_MIN[m] = 15; });
   const c = summarizePowerClimate({ properties: { parameter: p }, header: { range: '2001–2025 test' } }, 0);
   assert.ok(Math.abs(c.tempMeanK - 293.1) < 0.2);
@@ -287,6 +287,10 @@ test('NASA POWER climatology summariser uses monthly normals without inventing v
   assert.ok(c.solarFraction > 0.15 && c.solarFraction < 0.21);
   assert.ok(c.et0Mm > 500 && c.et0Mm < 4000);
   assert.ok(c.aridityIndex > 0);
+  assert.equal(c.albedo, 0.17);
+  assert.equal(brightnessClass(c.albedo).id, 'dark');
+  assert.equal(brightnessClass(null), null);
+  assert.equal(brightnessClass(0.65).id, 'very-bright');
   assert.match(c.et0Method, /Hargreaves/);
   const missing = JSON.parse(JSON.stringify(p));
   months.forEach((m) => { missing.T2M_MAX[m] = -999; });

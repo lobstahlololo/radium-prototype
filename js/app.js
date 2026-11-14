@@ -19,9 +19,9 @@ import { effectiveSolar, marsPressureKPa } from './science/solar.js';
 import { loadDem } from './science/terrain.js';
 import { buildTerrainRaster, TERRAIN_LAYERS } from './maps/dem-layer.js';
 import { PlanetGlobe } from './maps/globe.js';
-import { EarthMap, EARTH_LAYERS } from './maps/earth.js';
+import { EarthMap, EARTH_LAYERS, EARTH_BASEMAPS } from './maps/earth.js';
 import { drawContextThumb } from './maps/thumb.js';
-import { buildEarthProfile, buildPool } from './data/earth-climate.js';
+import { buildEarthProfile, buildPool, brightnessClass } from './data/earth-climate.js';
 import { openModal } from './ui/modals.js';
 
 const BODY_SITES = { moon: MOON_SITES, mars: MARS_SITES };
@@ -736,12 +736,14 @@ function renderLayers() {
         <p class="layer-group-title">Basemap</p>
         <label class="layer-row"><input type="radio" name="basemap" value="blue-marble" ${state.basemap === 'blue-marble' ? 'checked' : ''}><span>NASA Blue Marble</span><em>GIBS</em></label>
         <label class="layer-row"><input type="radio" name="basemap" value="satellite" ${state.basemap === 'satellite' ? 'checked' : ''}><span>Satellite imagery</span><em>Esri</em></label>
+        <label class="layer-row"><input type="radio" name="basemap" value="topography" ${state.basemap === 'topography' ? 'checked' : ''}><span>Topography</span><em>ASTER</em></label>
       </div>
       <div class="layer-group">
-        <p class="layer-group-title">Environmental overlays</p>
+        <p class="layer-group-title">Earth overlays</p>
         <label class="layer-row"><input type="radio" name="earth-overlay" value="none" ${state.earthOverlay === 'none' ? 'checked' : ''}><span>None</span></label>
+        <label class="layer-row"><input type="radio" name="earth-overlay" value="albedo" ${state.earthOverlay === 'albedo' ? 'checked' : ''}><span>Surface brightness</span><em>albedo</em></label>
         <label class="layer-row"><input type="radio" name="earth-overlay" value="lst" ${state.earthOverlay === 'lst' ? 'checked' : ''}><span>Land surface temperature</span><em>MODIS</em></label>
-        <label class="layer-row"><input type="radio" name="earth-overlay" value="aod" ${state.earthOverlay === 'aod' ? 'checked' : ''}><span>Aerosol optical depth</span><em>MODIS</em></label>
+        <label class="layer-row"><input type="radio" name="earth-overlay" value="aod" ${state.earthOverlay === 'aod' ? 'checked' : ''}><span>Aerosol optical depth</span><em>MERRA-2</em></label>
       </div>
       <label class="layer-row"><input type="checkbox" id="labels-toggle" ${state.labels ? 'checked' : ''}><span>Place labels</span><em>Esri</em></label>
       <p class="fine">${overlay ? esc(overlay.note) : 'Overlays are display-only NASA GIBS products; numeric extraction is not performed from tile colours.'}</p>`;
@@ -909,7 +911,7 @@ function renderStageChrome() {
   $('#attribution').textContent = twin
     ? 'Moon/Mars imagery: NASA LRO LROC, MGS Viking (Solar System Treks) · Earth: NASA GIBS · Climate: NASA POWER · DEM: LOLA, MOLA, Copernicus'
     : state.body === 'earth'
-      ? 'Earth imagery: NASA Blue Marble / MODIS via GIBS · Labels © Esri · Climate: NASA POWER'
+      ? 'Earth: NASA Blue Marble / ASTER GDEM / MODIS / MERRA-2 via GIBS · Labels © Esri · Climate: NASA POWER'
       : `Imagery: ${bodyMeta.mapCredit} · DEM: ${state.body === 'moon' ? 'LRO LOLA' : 'MGS MOLA'} 4 ppd · Temperatures: published Diviner/TES climatology`;
   $('#stage-note').innerHTML =
     state.layer !== 'sites' && state.body !== 'earth' && !twin
@@ -925,9 +927,18 @@ function renderLegend() {
     const def = EARTH_LAYERS[state.earthOverlay];
     el.innerHTML = `
       <div class="legend-head"><span>${esc(def.title)}</span><em>${esc(def.unit)}</em></div>
-      <div class="legend-image-wrap"><img src="${def.legendUrl}" alt="Legend for ${esc(def.title)}" loading="lazy" onerror="this.classList.add('is-missing');this.nextElementSibling.hidden=false">
-      <div class="fallback-ramp" hidden style="background:${def.fallbackGradient}"></div></div>
-      <div class="legend-ticks">${def.fallbackTicks.map((t) => `<span>${t}</span>`).join('')}</div>
+      <div class="legend-image-wrap">${def.legendUrl ? `<img src="${def.legendUrl}" alt="Legend for ${esc(def.title)}" loading="lazy" onerror="this.classList.add('is-missing');this.nextElementSibling.hidden=false"><div class="fallback-ramp" hidden style="background:${def.fallbackGradient}"></div>` : `<div class="fallback-ramp" style="background:${def.fallbackGradient}"></div>`}</div>
+      <div class="legend-ticks">${def.fallbackTicks.map((t, i) => `<span style="left:${(i / Math.max(1, def.fallbackTicks.length - 1)) * 100}%">${esc(t)}</span>`).join('')}</div>
+      <p class="legend-note">${esc(def.note)}</p>`;
+    return;
+  }
+
+  if (earthActive && state.basemap === 'topography') {
+    const def = EARTH_BASEMAPS.topography;
+    el.innerHTML = `
+      <div class="legend-head"><span>${esc(def.title)}</span><em>${esc(def.unit)}</em></div>
+      <div class="fallback-ramp" style="background:${def.fallbackGradient}"></div>
+      <div class="legend-ticks">${def.fallbackTicks.map((t, i) => `<span style="left:${(i / Math.max(1, def.fallbackTicks.length - 1)) * 100}%">${esc(t)}</span>`).join('')}</div>
       <p class="legend-note">${esc(def.note)}</p>`;
     return;
   }
@@ -1239,6 +1250,18 @@ function renderEarthFactorSection(compare) {
   </section>`;
 }
 
+function renderBrightnessFactors(c) {
+  const cls = brightnessClass(c.albedo);
+  return `<section class="panel-section">
+    <div class="section-head"><h3>Brightness factors</h3><span class="fine">surface reflectivity</span></div>
+    <dl class="metric-list">
+      <div><dt>Annual surface albedo</dt><dd>${c.albedo !== null && c.albedo !== undefined ? pct(c.albedo, 1) : 'Data unavailable.'}</dd>${c.albedo !== null && c.albedo !== undefined ? evidenceChip('modeled') : ''}<p>Fraction of incident shortwave radiation reflected by the surface, from NASA POWER/MERRA-2. It is a broadband climate albedo, not a visible-light photograph or a brightness temperature.</p></div>
+      <div><dt>Brightness class</dt><dd>${cls ? esc(cls.label) : 'Data unavailable.'}</dd><p>${cls ? `${esc(cls.note)} RADIUM display class; not a mission-suitability grade.` : 'No albedo value is available, so RADIUM does not assign a brightness class.'}</p></div>
+      <div><dt>Incident solar resource</dt><dd>${c.solarFraction !== null && c.solarFraction !== undefined ? `${pct(c.solarFraction, 1)} of solar constant` : 'Data unavailable.'}</dd><p>Annual mean downwelling shortwave radiation. This is illumination, not surface brightness.</p></div>
+    </dl>
+  </section>`;
+}
+
 function renderEarthInspector() {
   const profile = state.selection.profile;
   const c = profile.climate;
@@ -1270,6 +1293,7 @@ function renderEarthInspector() {
       <div><dt>Aridity index</dt><dd>${c.aridityIndex ?? 'Data unavailable.'} <small>P/PET₀</small></dd><p>Lower values indicate more arid conditions; above 1, precipitation exceeds estimated demand. ${esc(c.et0Method || 'Reference ET₀')}.</p></div>
       <div><dt>Solar resource</dt><dd>${c.solarFraction !== null ? pct(c.solarFraction, 1) : 'Data unavailable.'} of solar constant</dd><p>Annual mean surface shortwave radiation divided by the 24-hour solar constant — the same physical quantity used for planetary sites.</p></div>
     </dl>` : `<div class="alert alert-warn"><strong>Climate data unavailable.</strong> Climate normals could not be retrieved for this point. Thermal and solar similarity cannot be computed.</div>`}
+    ${c ? renderBrightnessFactors(c) : ''}
     ${t ? `<section class="panel-section"><div class="section-head"><h3>Terrain</h3><span class="fine">${esc(t.datasetLabel)}</span></div>
       <dl class="metric-grid">
         <div><dt>Elevation</dt><dd>${t.elevationM} <small>m</small></dd><span>DEM sample</span></div>
@@ -1433,6 +1457,7 @@ function bind() {
     } else if (t.name === 'basemap') {
       state.basemap = t.value;
       state.earthMap?.setBasemap(state.basemap);
+      renderLegend();
     } else if (t.name === 'earth-overlay') {
       state.earthOverlay = t.value;
       state.earthMap?.setOverlay(state.earthOverlay);

@@ -183,7 +183,8 @@ For each candidate and for arbitrary clicked points:
   - `et0Mm = Hargreaves estimate from monthly temperature range and TOA radiation (RADIUM-derived)`
   - `aridityIndex = annual precipitation / annual ET₀`
   - `solarFraction = annual mean shortwave MJ/m²/day / 117.6`
-  - The ERA5 fallback uses daily means with FAO-56 ET₀ instead; the source and ET₀ method are shown with each profile.
+  - `albedo = ALLSKY_SRF_ALB` annual mean surface albedo (fraction), used for the per-site brightness profile.
+  - The ERA5 fallback uses daily means with FAO-56 ET₀ instead; the source and ET₀ method are shown with each profile. ERA5 does not provide an albedo value in this pipeline, so brightness remains unavailable rather than being inferred.
 - **Terrain**: Copernicus DEM GLO-90 sampled on an adaptive 3×3 grid at ≈10 km spacing around the point; Horn slope; elevation standard deviation as roughness.
 - Climate is reanalysis and air temperature is a thermal-environment proxy, not a skin temperature. It is flagged in the UI and in the caveats.
 
@@ -265,6 +266,28 @@ A group grade is the effective-weight-weighted mean of its available dimension s
 
 The Moon/Mars analog interface reports only the **top five** Earth candidates. The Earth candidate list reports each site’s best planetary match and overall grade after the live pool has been measured.
 
+### 4.8 Brightness factors
+
+Surface brightness is represented by **broadband surface albedo**, the fraction of incident shortwave radiation reflected by the surface. It is distinct from brightness temperature and from the visual brightness of an image.
+
+- The map layer is **MODIS combined black-sky albedo** (`MODIS_Combined_L3_Black_Sky_Albedo_Daily`), a 16-day BRDF retrieval displayed at the latest available date.
+- The per-site value is **NASA POWER/MERRA-2 annual surface albedo** (`ALLSKY_SRF_ALB`), shown with a `modeled` evidence label. It is a reanalysis value, not a station measurement.
+- The display classes are RADIUM-defined and descriptive: very dark <0.10, dark 0.10–0.20, moderately bright 0.20–0.35, bright 0.35–0.60, very bright ≥0.60. They are not grades or NASA classifications.
+- Incident solar resource (`solarFraction`) is shown alongside albedo but is not combined with it: illumination is not brightness.
+- If albedo is absent, RADIUM shows “Data unavailable” and does not assign a class.
+
+### 4.9 Earth map layers
+
+| Layer | Product | Nature |
+| --- | --- | --- |
+| Blue Marble | `BlueMarble_ShadedRelief_Bathymetry` | Static true-colour composite with cartographic relief |
+| Topography | `ASTER_GDEM_Color_Shaded_Relief` | Static ASTER GDEM shaded relief, ~83°N–83°S |
+| Land surface temperature | `MODIS_Terra_L3_Land_Surface_Temp_8Day_Day` | Latest 8-day day composite |
+| Surface brightness | `MODIS_Combined_L3_Black_Sky_Albedo_Daily` | Latest 16-day BRDF/albedo retrieval |
+| Aerosol | `MERRA2_Total_Aerosol_Optical_Thickness_550nm_Extinction_Monthly` | Monthly reanalysis extinction AOD |
+
+The overlays are display-only and are never used as inputs to the analog score. No numeric value is extracted from tile colours; numeric values come from point APIs and bundled DEMs. Topographic shading is cartographic and does not replace the Copernicus DEM point sample.
+
 ---
 
 ## 5. Terrain computation
@@ -318,6 +341,7 @@ Automated tests (`npm test`, 24 tests):
 - Similarity bounds, symmetry, identical-value identity, missing-dimension renormalisation, incomparable list.
 - Inverse Earth-to-planet ranking and planetary identity preservation.
 - Eight-factor grouping, including explicitly unassessed and partial factors.
+- Annual albedo parsing and the RADIUM brightness classes, including null handling.
 - Affinity matrices symmetric and within [0,1].
 - DEM bilinear sampling, Horn slope against an analytic gradient, roughness on flat/sloped synthetic grids.
 - NASA POWER summariser on synthetic monthly normals (annual mean, monthly-mean diurnal range, precipitation, solar, Hargreaves ET₀, missing `-999` handling).

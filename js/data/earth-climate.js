@@ -13,7 +13,7 @@
 
 import { geometricSolarFraction } from '../science/solar.js';
 
-const CLIMATE_CACHE_KEY = 'radium.earth.climate.v2';
+const CLIMATE_CACHE_KEY = 'radium.earth.climate.v3';
 const POWER_URL = 'https://power.larc.nasa.gov/api/temporal/climatology/point';
 const POWER_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -107,6 +107,7 @@ export function summarizeClimate(json, lat) {
     et0Mm: et0Mm === null ? null : Number(et0Mm.toFixed(0)),
     aridityIndex: precipMm !== null && et0Mm !== null ? Number((precipMm / Math.max(1, et0Mm)).toFixed(3)) : null,
     solarFraction: solarFraction === null ? null : Number(solarFraction.toFixed(3)),
+    albedo: null,
     period: `${START_DATE} → ${END_DATE}`,
     years: CLIMATE_YEARS.slice(),
     source: 'ERA5 reanalysis via Open-Meteo archive API (fallback)',
@@ -159,6 +160,7 @@ export function summarizePowerClimate(json, lat) {
   const et0Mm = etN > 0 ? (etSum / etN) * 365.25 : null;
   const swKwh = get('ALLSKY_SFC_SW_DWN', 'ANN');
   const solarFraction = swKwh === null ? null : Math.max(0, Math.min(1, (swKwh * 3.6) / SOLAR_CONSTANT_DAILY_MJ));
+  const albedo = get('ALLSKY_SRF_ALB', 'ANN');
 
   return {
     tempMeanK: Number((meanC + 273.15).toFixed(1)),
@@ -168,6 +170,7 @@ export function summarizePowerClimate(json, lat) {
     et0Mm: et0Mm === null ? null : Number(et0Mm.toFixed(0)),
     aridityIndex: precipMm !== null && et0Mm ? Number((precipMm / Math.max(1, et0Mm)).toFixed(3)) : null,
     solarFraction: solarFraction === null ? null : Number(solarFraction.toFixed(3)),
+    albedo: albedo === null ? null : Number(albedo.toFixed(3)),
     period: json?.header?.range || 'NASA POWER 25-year climatology (Jan 2001 – Dec 2025)',
     years: null,
     source: 'NASA POWER 25-year climatology (MERRA-2/POWER)',
@@ -180,7 +183,7 @@ export function summarizePowerClimate(json, lat) {
 
 async function fetchPowerClimate(lat, lon) {
   const params = new URLSearchParams({
-    parameters: 'T2M,T2M_MAX,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN',
+    parameters: 'T2M,T2M_MAX,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN,ALLSKY_SRF_ALB',
     community: 'RE',
     longitude: String(lon),
     latitude: String(lat),
@@ -340,6 +343,20 @@ export async function buildPool(analogs, onProgress) {
 
   await Promise.all(Array.from({ length: Math.min(concurrency, analogs.length) }, worker));
   return results;
+}
+
+/**
+ * RADIUM display class for annual surface albedo. These thresholds are
+ * descriptive, not a mission-suitability scale or a NASA classification.
+ */
+export function brightnessClass(albedo) {
+  if (albedo === null || albedo === undefined || Number.isNaN(Number(albedo))) return null;
+  const a = Number(albedo);
+  if (a < 0.1) return { id: 'very-dark', label: 'Very dark', note: 'Less than 10% of incident shortwave is reflected.' };
+  if (a < 0.2) return { id: 'dark', label: 'Dark', note: '10–20% of incident shortwave is reflected.' };
+  if (a < 0.35) return { id: 'moderate', label: 'Moderately bright', note: '20–35% of incident shortwave is reflected.' };
+  if (a < 0.6) return { id: 'bright', label: 'Bright', note: '35–60% of incident shortwave is reflected.' };
+  return { id: 'very-bright', label: 'Very bright', note: 'At least 60% of incident shortwave is reflected; typical of snow and ice.' };
 }
 
 /** Top-of-atmosphere reference used for the Earth solar fraction (exported for tests). */
