@@ -24,43 +24,14 @@ const IMAGERY = {
   },
 };
 
-const GRADE_COLORS = {
-  A: ['#0e3b2e', '#4ade80'],
-  B: ['#0b3336', '#2dd4bf'],
-  C: ['#3b3312', '#fbbf24'],
-  D: ['#3b2012', '#fb923c'],
-  F: ['#3b1218', '#f87171'],
-  '—': ['#1b2436', '#94a3b8'],
-};
-
-function badgeImage(letter) {
-  const [bg, fg] = GRADE_COLORS[letter] || GRADE_COLORS['—'];
-  const size = 96;
-  const c = document.createElement('canvas');
-  c.width = size;
-  c.height = size;
-  const ctx = c.getContext('2d');
-  ctx.beginPath();
-  ctx.arc(size / 2, size / 2 - 8, 30, 0, Math.PI * 2);
-  ctx.fillStyle = bg;
-  ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = fg;
-  ctx.stroke();
-  ctx.fillStyle = fg;
-  ctx.font = '600 34px Inter, system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(letter, size / 2, size / 2 - 4);
-  // pointer
-  ctx.beginPath();
-  ctx.moveTo(size / 2 - 7, size / 2 + 14);
-  ctx.lineTo(size / 2 + 7, size / 2 + 14);
-  ctx.lineTo(size / 2, size / 2 + 26);
-  ctx.closePath();
-  ctx.fillStyle = fg;
-  ctx.fill();
-  return c.toDataURL();
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[character]));
 }
 
 export class PlanetGlobe {
@@ -75,6 +46,9 @@ export class PlanetGlobe {
     this.overlay = null;
     this.viewer = null;
     this.creditEl = null;
+    this.markerLayer = null;
+    this._markers = new Map();
+    this._removeMarkerListener = null;
   }
 
   async init() {
@@ -163,49 +137,68 @@ export class PlanetGlobe {
       scene.canvas.style.cursor = C.defined(picked) && picked.id?.radiumSiteId ? 'pointer' : 'grab';
     }, C.ScreenSpaceEventType.MOUSE_MOVE);
 
+    this.markerLayer = document.createElement('div');
+    this.markerLayer.className = 'globe-marker-layer';
+    this.container.appendChild(this.markerLayer);
+    this._removeMarkerListener = scene.postRender.addEventListener(() => this.updateMarkerPositions());
+
     this.onStatus?.({ type: 'globe', ok: true, message: `${cfg.credit}` });
     return this;
   }
 
-  badgeFor(letter) {
-    if (!this._badges) this._badges = {};
-    const key = letter || '—';
-    if (!this._badges[key]) this._badges[key] = badgeImage(key);
-    return this._badges[key];
+  /** sites: [{...site, grade}] */
+  setSites(sites) {
+    if (!this.viewer || !this.markerLayer) return;
+    const C = window.Cesium;
+    this.sites = sites;
+    this._markers.clear();
+    this.markerLayer.replaceChildren();
+
+    for (const site of sites) {
+      const grade = site.grade || '—';
+      const marker = document.createElement('button');
+      marker.type = 'button';
+      marker.className = `globe-marker grade-${grade === '—' ? 'U' : grade}${site.id === this.selectedId ? ' is-selected' : ''}`;
+      marker.dataset.siteId = site.id;
+      marker.title = `${site.name} — suitability grade ${grade}`;
+      marker.setAttribute('aria-label', `${site.name}, suitability grade ${grade}`);
+      marker.innerHTML = `
+        <span class="globe-marker-label">${escapeHtml(site.name)}</span>
+        <span class="globe-marker-badge">${escapeHtml(grade)}</span>
+        <span class="globe-marker-tip" aria-hidden="true"></span>`;
+      marker.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.onSiteSelect?.(site.id);
+      });
+      this.markerLayer.appendChild(marker);
+      this._markers.set(site.id, {
+        el: marker,
+        // Markers sit on the visible ellipsoid, not at DEM elevation. The globe
+        // is smooth, so an elevation offset would sink or float the pin.
+        position: C.Cartesian3.fromDegrees(site.lon, site.lat, 0, this.ellipsoid),
+      });
+    }
+    this.updateMarkerPositions();
   }
 
-  /** sites: [{...site, grade, elevationM}] */
-  setSites(sites) {
-    if (!this.viewer) return;
+  updateMarkerPositions() {
+    if (!this.viewer || !this.markerLayer) return;
     const C = window.Cesium;
-    for (const entity of this._entities || []) this.viewer.entities.remove(entity);
-    this._entities = [];
-    this.sites = sites;
-    for (const site of sites) {
-      const entity = this.viewer.entities.add({
-        position: C.Cartesian3.fromDegrees(site.lon, site.lat, (site.elevationM ?? 0) + 1200, this.ellipsoid),
-        billboard: {
-          image: this.badgeFor(site.grade),
-          width: site.id === this.selectedId ? 36 : 27,
-          height: site.id === this.selectedId ? 36 : 27,
-          verticalOrigin: C.VerticalOrigin.BOTTOM,
-          scaleByDistance: new C.NearFarScalar(200000, 1.25, 30000000, 0.75),
-        },
-        label: {
-          text: site.name,
-          font: '500 13px Inter, system-ui, sans-serif',
-          fillColor: C.Color.WHITE,
-          showBackground: true,
-          backgroundColor: C.Color.fromCssColorString('rgba(4,9,17,0.82)'),
-          backgroundPadding: new C.Cartesian2(8, 5),
-          pixelOffset: new C.Cartesian2(0, -44),
-          verticalOrigin: C.VerticalOrigin.BOTTOM,
-          show: site.id === this.selectedId,
-          disableDepthTestDistance: 6000,
-        },
-      });
-      entity.radiumSiteId = site.id;
-      this._entities.push(entity);
+    const scene = this.viewer.scene;
+    const occluder = new C.EllipsoidalOccluder(this.ellipsoid, scene.camera.positionWC);
+    const width = this.container.clientWidth;
+    const height = this.container.clientHeight;
+    for (const marker of this._markers.values()) {
+      const screen = C.SceneTransforms.worldToWindowCoordinates(scene, marker.position);
+      const visible = Boolean(screen) && occluder.isPointVisible(marker.position)
+        && screen.x > -48 && screen.x < width + 48
+        && screen.y > -64 && screen.y < height + 24;
+      if (!visible) {
+        marker.el.hidden = true;
+        continue;
+      }
+      marker.el.hidden = false;
+      marker.el.style.transform = `translate3d(${screen.x.toFixed(1)}px, ${screen.y.toFixed(1)}px, 0) translate(-50%, -100%)`;
     }
   }
 
@@ -263,6 +256,11 @@ export class PlanetGlobe {
   }
 
   destroy() {
+    if (this._removeMarkerListener) this._removeMarkerListener();
+    this._removeMarkerListener = null;
+    this._markers.clear();
+    this.markerLayer?.remove();
+    this.markerLayer = null;
     if (this.handler) this.handler.destroy();
     if (this.viewer) this.viewer.destroy();
     this.viewer = null;
