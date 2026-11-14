@@ -1193,6 +1193,21 @@ function renderEmptyInspector() {
 /* -------------------------------------------------------------------- events */
 
 function bind() {
+  const railTabs = [...document.querySelectorAll('.rail-tab')];
+  railTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const section = tab.dataset.rail;
+      railTabs.forEach((button) => {
+        const active = button === tab;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.rail-view').forEach((view) => {
+        view.classList.toggle('is-active', view.dataset.railView === section);
+      });
+    });
+  });
+
   document.querySelectorAll('.planet-tab').forEach((btn) => {
     btn.addEventListener('click', () => switchBody(btn.dataset.body));
   });

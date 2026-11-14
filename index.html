@@ -55,27 +55,41 @@
     </div>
 
     <main class="workspace">
-      <aside class="rail rail-left" aria-label="Map layers and candidate ranking">
-        <section class="panel" id="panel-layers">
-          <div class="panel-head"><h2>Layers</h2><span class="panel-kicker" id="layers-kicker">Lunar surface</span></div>
-          <div class="panel-body" id="layers-body"></div>
-        </section>
+      <aside class="rail rail-left" aria-label="Sites, map layers and mission priorities">
+        <div class="rail-tabs" role="tablist" aria-label="Sidebar sections">
+          <button class="rail-tab is-active" type="button" role="tab" aria-selected="true" data-rail="sites">Sites</button>
+          <button class="rail-tab" type="button" role="tab" aria-selected="false" data-rail="layers">Layers</button>
+          <button class="rail-tab" type="button" role="tab" aria-selected="false" data-rail="priorities">Priorities</button>
+        </div>
 
-        <section class="panel" id="panel-priorities">
-          <div class="panel-head">
-            <h2>Mission priorities</h2>
-            <button class="mini-btn" id="reset-priorities" type="button">Reset</button>
-          </div>
-          <div class="panel-body" id="priorities-body"></div>
-        </section>
+        <div class="rail-views">
+          <section class="rail-view is-active" data-rail-view="sites">
+            <section class="panel panel-grow" id="panel-candidates">
+              <div class="panel-head">
+                <h2 id="candidates-title">Candidate ranking</h2>
+                <span class="panel-kicker" id="candidates-kicker"></span>
+              </div>
+              <div class="panel-body list-body" id="candidates-body"></div>
+            </section>
+          </section>
 
-        <section class="panel panel-grow" id="panel-candidates">
-          <div class="panel-head">
-            <h2 id="candidates-title">Candidate ranking</h2>
-            <span class="panel-kicker" id="candidates-kicker"></span>
-          </div>
-          <div class="panel-body list-body" id="candidates-body"></div>
-        </section>
+          <section class="rail-view" data-rail-view="layers">
+            <section class="panel" id="panel-layers">
+              <div class="panel-head"><h2>Map layers</h2><span class="panel-kicker" id="layers-kicker">Lunar surface</span></div>
+              <div class="panel-body" id="layers-body"></div>
+            </section>
+          </section>
+
+          <section class="rail-view" data-rail-view="priorities">
+            <section class="panel" id="panel-priorities">
+              <div class="panel-head">
+                <h2>Mission priorities</h2>
+                <button class="mini-btn" id="reset-priorities" type="button">Reset</button>
+              </div>
+              <div class="panel-body" id="priorities-body"></div>
+            </section>
+          </section>
+        </div>
       </aside>
 
       <section class="stage" aria-label="Interactive map">

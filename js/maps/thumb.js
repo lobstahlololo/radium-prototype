@@ -68,8 +68,8 @@ export async function drawContextThumb(canvas, { body, lat, lon }) {
   const h = 256;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
-  canvas.style.width = `${w}px`;
-  canvas.style.height = `${h}px`;
+  // Let the card CSS control display size; inline sizes override the compact
+  // inspector aspect and force a 384×256 block on every layout.
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
   ctx.fillStyle = '#070b13';
