@@ -9,11 +9,14 @@
  */
 
 import { clamp01, letterGrade, piecewise, round } from './grade.js';
-import { effectiveSolar, marsPressureKPa } from './solar.js';
+import { effectiveSolar, marsPressureKPa, meanSurfaceIrradiance } from './solar.js';
 
 export const FACTORS = {
   ice: { label: 'Water & ice resources', unit: 'ice evidence index', higherBetter: true, description: 'Mapped ice evidence or hydration at regional scale; stronger evidence scores higher.' },
   solar: { label: 'Solar energy', unit: 'fraction of solar constant', higherBetter: true, description: 'Modelled annual mean surface insolation as a fraction of the solar constant. Polar illumination-time percentages are shown separately because they are not an energy quantity.' },
+  luminosity: { label: 'Luminosity — mean irradiance', unit: 'W/m²', higherBetter: true, description: 'Absolute modelled annual mean surface irradiance. The Moon and Mars receive different stellar flux at their orbits, so the same relative solar fraction does not deliver the same power.' },
+  thermalCycle: { label: 'Thermal cycling', unit: 'K diurnal range', higherBetter: false, description: 'Mean monthly diurnal temperature range as an engineering proxy for thermal fatigue and survival-heater demand.' },
+  trafficability: { label: 'Surface trafficability', unit: 'RADIUM assessment', higherBetter: true, description: 'RADIUM-defined assessment of likely bearing and traction from the broad substrate class. It is not measured regolith mechanics or a rover mobility certificate.' },
   slope: { label: 'Terrain safety — slope', unit: '°', higherBetter: false, description: 'Regional slope from the 0.25°/px DEM. Landing and construction need much finer terrain data.' },
   roughness: { label: 'Terrain roughness', unit: 'm relief (σ)', higherBetter: false, description: 'Standard deviation of elevation in a ~30 km window; a mobility and construction indicator.' },
   temp: { label: 'Thermal conditions', unit: 'K mean', higherBetter: true, description: 'Regional mean surface temperature; operational comfort, not a measured time series at the point.' },
@@ -31,7 +34,7 @@ export const MISSION_PROFILES = {
     label: 'Lunar Permanent Base',
     short: 'Lunar base',
     description: 'Long-duration surface presence: prioritises ice access, power, stable terrain and Earth communications.',
-    weights: { ice: 0.24, solar: 0.16, slope: 0.14, roughness: 0.09, temp: 0.1, comms: 0.11, geology: 0.08, science: 0.08 },
+    weights: { ice: 0.2, solar: 0.13, luminosity: 0.05, slope: 0.12, roughness: 0.08, temp: 0.09, thermalCycle: 0.06, comms: 0.1, geology: 0.07, science: 0.06, trafficability: 0.04 },
     constraints: [{ factor: 'slope', max: 25, label: 'Slope above 25° fails the base-construction screen (RADIUM-defined).' }],
   },
   mars_robotic: {
@@ -40,7 +43,7 @@ export const MISSION_PROFILES = {
     label: 'Mars Robotic Landing',
     short: 'Robotic landing',
     description: 'Safe landing and surface operations for a robotic mission: slope, roughness and altitude dominate.',
-    weights: { slope: 0.22, roughness: 0.16, elevation: 0.12, ice: 0.12, solar: 0.1, science: 0.18, dust: 0.1 },
+    weights: { slope: 0.18, roughness: 0.13, elevation: 0.1, ice: 0.1, solar: 0.08, luminosity: 0.04, thermalCycle: 0.06, science: 0.14, dust: 0.08, trafficability: 0.05, geology: 0.04 },
     constraints: [{ factor: 'slope', max: 15, label: 'Slope above 15° fails the robotic landing screen (RADIUM-defined; real EDL limits are vehicle-specific).' }],
   },
   mars_human: {
@@ -49,7 +52,7 @@ export const MISSION_PROFILES = {
     label: 'Mars Human Exploration',
     short: 'Human exploration',
     description: 'Crewed surface exploration: balances resources, terrain, thermal and dust exposure with science value.',
-    weights: { ice: 0.22, solar: 0.12, slope: 0.12, roughness: 0.08, temp: 0.1, dust: 0.1, science: 0.12, geology: 0.06, elevation: 0.08 },
+    weights: { ice: 0.18, solar: 0.1, luminosity: 0.04, slope: 0.1, roughness: 0.07, temp: 0.08, thermalCycle: 0.07, dust: 0.08, science: 0.12, geology: 0.05, elevation: 0.06, trafficability: 0.05 },
     constraints: [{ factor: 'slope', max: 20, label: 'Slope above 20° fails the crewed-operations screen (RADIUM-defined).' }],
   },
 };
@@ -91,6 +94,39 @@ export function evaluateFactor(id, site, terrain, body) {
         ? ` Published illumination model: ${Math.round(solar.publishedIllumination.value * 100)}% of the year sunlit (a time fraction, not energy).`
         : '';
       return { available: true, score, evidence: solar.evidence, raw: solar.value, unit: 'fraction of solar constant', detail: `${solar.note}${extra}` };
+    }
+    case 'luminosity': {
+      const irradiance = meanSurfaceIrradiance(site);
+      if (!irradiance) return unavailable('No orbital irradiance or latitude available for this site.');
+      const score = piecewise(irradiance.value, [[0, 0], [50, 8], [100, 22], [150, 42], [250, 62], [400, 85], [600, 96], [900, 100]]);
+      return { available: true, score, evidence: irradiance.evidence, raw: irradiance.value, unit: 'W/m²', detail: irradiance.note };
+    }
+    case 'thermalCycle': {
+      if (!site.tempAmpK) return unavailable('No diurnal temperature range available for this site.');
+      const amp = Number(site.tempAmpK.value);
+      const score = piecewise(amp, [[0, 100], [10, 92], [25, 75], [50, 50], [80, 25], [120, 8], [200, 0]]);
+      return { available: true, score, evidence: site.tempAmpK.evidence || 'modeled', raw: amp, unit: 'K', detail: `Mean diurnal range ${Math.round(amp)} K: lower cycling is easier on seals, electronics and structures. ${site.tempAmpK.note || ''}` };
+    }
+    case 'trafficability': {
+      const map = {
+        basalt: [82, 'Hard basaltic rock and regolith: generally predictable bearing, with loose surface material still vehicle-dependent.'],
+        highland: [74, 'Fractured highland rock and regolith: variable bearing, but broadly competent for traverses.'],
+        impact: [70, 'Impact breccia, ejecta and melt: mixed bearing and localized rubble.'],
+        sulfate: [48, 'Sulfate-rich layered material: often soft or friable, with uncertain bearing.'],
+        clay: [38, 'Clay-bearing ground: potential mudstone/soft sediment and low bearing after disturbance.'],
+        salt: [55, 'Salt crust and evaporite: hard crusts can overlie weak or void-rich material.'],
+        ice: [22, 'Ice-rich ground: strength is strongly temperature- and ice-content-dependent.'],
+        permafrost: [42, 'Ice-cemented permafrost: variable bearing and thaw sensitivity.'],
+        tephra: [32, 'Loose tephra and ash: low bearing and high wheel-slip potential.'],
+        sand: [40, 'Sand and desert pavement: trafficable in places, but loose sand can trap wheels.'],
+        silica: [60, 'Silica-rich volcanic material: competent in places, with abrasive dust.'],
+        carbonate: [68, 'Carbonate bedrock and sediments: generally competent, with karst or fracture uncertainty.'],
+        granite: [86, 'Crystalline granite: high expected bearing where exposed and unfractured.'],
+        andesite: [72, 'Andesitic volcanic rock: competent lava and breccia with local loose cover.'],
+        ultramafic: [78, 'Dense ultramafic rock: high expected bearing where exposed and unfractured.'],
+      }[site.substrateGroup];
+      if (!map) return unavailable('No substrate class available for a trafficability assessment.');
+      return { available: true, score: map[0], evidence: 'assessment', raw: site.substrateGroup, unit: 'substrate class', detail: `${map[1]} RADIUM-defined screening assessment; not measured regolith mechanics.` };
     }
     case 'slope': {
       if (!terrain || terrain.slopeDeg === null) return unavailable('DEM coverage unavailable at this location.');

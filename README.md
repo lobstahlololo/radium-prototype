@@ -21,7 +21,7 @@ node server.mjs 8080
 No install or build step is required. An internet connection is needed for NASA imagery tiles and Earth measurements (NASA POWER, with ERA5/Open-Meteo fallback). CesiumJS, MapLibre GL and fonts are loaded from public CDNs.
 
 ```bash
-npm test           # 24 unit tests (grading, scoring, similarity, terrain, catalogs)
+npm test           # 27 unit tests (grading, scoring, similarity, terrain, catalogs)
 npm run data       # re-download and rebuild the bundled DEMs from NASA PDS
 ```
 
@@ -42,6 +42,11 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | Mission profiles: lunar base, Mars robotic landing, Mars human exploration | Working |
 | Adjustable priorities with live re-ranking and explanation | Working |
 | Explainable A–F suitability grades with coverage/confidence and constraints | Working |
+| Grade-coloured factor bars for every mission factor, plus luminosity, thermal cycling and surface trafficability | Working |
+| Head-to-head: retain a Moon/Mars site, then click any Earth pin for factor-by-factor comparison | Working |
+| Statistical shortlist of less-studied Earth candidates for the selected planetary site | Working (curated pool only) |
+| 0–100 Earth similarity estimates on every pin, candidate row and comparison hero | Working |
+| Top-five-only compare matrix across every scored dimension plus albedo, aridity and elevation | Working |
 | Earth Twin Mode: live NASA POWER/DEM measurements, top-five terrestrial analogs, dimension grades | Working |
 | Earth dossier: overall best-planet match, eight-factor analog profile, brightness/albedo factors, explicit data gaps | Working |
 | Side-by-side comparison, strong/weak matches, applications, physical mismatches | Working |
@@ -65,7 +70,7 @@ RADIUM keeps two questions strictly apart:
 1. **Site suitability** — weighted multicriteria model over mission-specific factors:
    `S = Σ(wᵢ·sᵢ) / Σwᵢ`, with weights normalised over available factors. Hard screens can cap a grade at F. Coverage and confidence are reported; a grade is withheld below 50% data coverage.
 2. **Earth analog similarity** — separate dimension-by-dimension comparison:
-   `A = Σ(vᵢ·dᵢ) / Σvᵢ`, using documented scales for thermal, terrain and solar dimensions and fixed affinity matrices for material/volatile classes. Gravity, pressure, radiation and dust physics are excluded and displayed as mismatches.
+   `A = Σ(vᵢ·dᵢ) / Σvᵢ`, using documented scales for thermal, terrain and luminosity dimensions and fixed affinity matrices for material/volatile classes. Gravity, pressure, radiation and dust physics are excluded and displayed as mismatches.
    The inverse direction matches each Earth candidate against all 31 curated Moon/Mars sites, selects its best overall analog match, and groups the same comparable dimensions into the eight-factor profile. Dust, biology and subsurface factors have no comparable datasets and remain explicitly unassessed.
 
 Grades: A ≥ 80, B ≥ 65, C ≥ 50, D ≥ 35, F < 35. These are RADIUM-defined exploratory assessments, **not NASA certification**.
@@ -113,7 +118,7 @@ data/
   dem-meta.json            Grid metadata, source checksums, percentiles
 
 tools/prepare-data.mjs     Reproducible PDS ingestion
-tests/                     22 unit + catalog-integrity tests
+tests/                     27 unit + catalog-integrity tests
 docs/                      Methodology and data-source documentation
 ```
 
@@ -129,7 +134,7 @@ docs/                      Methodology and data-source documentation
 | Mars imagery | MGS Viking MDIM21 color mosaic 232 m | Live WMTS, NASA Solar System Treks |
 | Earth basemap | NASA Blue Marble / shaded relief | Live WMTS, NASA GIBS |
 | Earth temperature overlay | MODIS Terra LST 8-day day | Live WMTS, NASA GIBS |
-| Earth aerosol overlay | MODIS Terra AOD 3 km | Live WMTS, NASA GIBS |
+| Earth aerosol overlay | MERRA-2 monthly AOD at 550 nm | Live WMTS, NASA GIBS |
 | Earth climate | NASA POWER 25-year climatology (2001–2025) | Live POWER API; ERA5 fallback |
 | Earth terrain | Copernicus DEM GLO-90 | Live Open-Meteo elevation API |
 | Planetary temperature/illumination/ice | Diviner, LAMP/Mini-RF, LCROSS, CRISM, Odyssey, SHARAD, TES | Cited regional values, never fabricated point data |

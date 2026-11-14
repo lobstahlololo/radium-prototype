@@ -58,6 +58,9 @@ Anchors are piecewise-linear; values outside the range clamp. These are RADIUM-d
 | --- | --- | --- | --- | --- |
 | Ice/volatile evidence | index 0–100 | directly from curated evidence index | observed / inferred | higher |
 | Solar energy | fraction of solar constant | 0→0, 0.05→12, 0.15→35, 0.25→60, 0.35→80, 0.5→95, 0.7→100 | modeled | higher |
+| Luminosity (absolute mean irradiance) | W/m² | 0→0, 50→8, 100→22, 150→42, 250→62, 400→85, 600→96, 900→100 | modeled | higher |
+| Thermal cycling | K diurnal range | 0→100, 10→92, 25→75, 50→50, 80→25, 120→8, 200→0 | modeled | lower |
+| Surface trafficability | broad substrate class | RADIUM-defined assessment, 22–86 | assessment | higher |
 | Slope | ° | 0→100, 2→95, 5→80, 8→60, 12→35, 20→10, 30→0 | derived | lower |
 | Roughness | m σ | 0→100, 3→90, 8→75, 20→55, 50→30, 100→12, 200→0 | derived | lower |
 | Mean temperature | K | 120→12, 160→38, 200→68, 230→88, 250→96, 270→100, 300→90, 340→60, 400→25 | modeled | peak at 250–270 K |
@@ -78,14 +81,17 @@ Weights sum to 1 in every profile. The interface renormalises after user multipl
 
 | Factor | Weight |
 | --- | --- |
-| Water & ice resources | 24% |
-| Solar energy | 16% |
-| Terrain safety — slope | 14% |
-| Earth communication | 11% |
-| Thermal conditions | 10% |
-| Terrain roughness | 9% |
-| Geological relevance | 8% |
-| Exploration value | 8% |
+| Water & ice resources | 20% |
+| Solar energy | 13% |
+| Terrain safety — slope | 12% |
+| Earth communication | 10% |
+| Thermal conditions | 9% |
+| Terrain roughness | 8% |
+| Geological relevance | 7% |
+| Thermal cycling | 6% |
+| Exploration value | 6% |
+| Luminosity | 5% |
+| Surface trafficability | 4% |
 
 Hard screen: slope > 25° → grade capped at F.
 
@@ -93,13 +99,17 @@ Hard screen: slope > 25° → grade capped at F.
 
 | Factor | Weight |
 | --- | --- |
-| Terrain safety — slope | 22% |
-| Exploration value | 18% |
-| Terrain roughness | 16% |
-| Water & ice resources | 12% |
-| Landing altitude | 12% |
-| Solar energy | 10% |
-| Dust exposure | 10% |
+| Terrain safety — slope | 18% |
+| Exploration value | 14% |
+| Terrain roughness | 13% |
+| Water & ice resources | 10% |
+| Landing altitude | 10% |
+| Solar energy | 8% |
+| Dust exposure | 8% |
+| Thermal cycling | 6% |
+| Surface trafficability | 5% |
+| Luminosity | 4% |
+| Geological relevance | 4% |
 
 Hard screen: slope > 15° → F.
 
@@ -107,15 +117,18 @@ Hard screen: slope > 15° → F.
 
 | Factor | Weight |
 | --- | --- |
-| Water & ice resources | 22% |
-| Solar energy | 12% |
-| Terrain safety — slope | 12% |
+| Water & ice resources | 18% |
+| Solar energy | 10% |
+| Terrain safety — slope | 10% |
 | Exploration value | 12% |
-| Thermal conditions | 10% |
-| Dust exposure | 10% |
-| Terrain roughness | 8% |
-| Landing altitude | 8% |
-| Geological relevance | 6% |
+| Thermal conditions | 8% |
+| Dust exposure | 8% |
+| Terrain roughness | 7% |
+| Thermal cycling | 7% |
+| Landing altitude | 6% |
+| Geological relevance | 5% |
+| Surface trafficability | 5% |
+| Luminosity | 4% |
 
 Hard screen: slope > 20° → F.
 
@@ -200,12 +213,12 @@ The solar fraction is the same physical quantity used for planets: annual mean s
 | Terrain roughness (~30 km) | 14% | log-ratio, saturating at 2.2 in log space |
 | Surface material | 18% | fixed affinity matrix |
 | Volatile setting | 12% | fixed affinity matrix |
-| Relative solar resource | 12% | linear, 0.4 fraction difference → 0 |
+| Luminosity / mean surface irradiance | 12% | linear, 300 W/m² difference → 0 |
 
 Similarity \(d_i \in [0,1]\). Available weights renormalise:
 \(A = \sum v_i d_i / \sum v_i\). Effective weight is displayed per dimension.
 
-Missing dimensions are dropped, listed as such, and coverage decreases. Confidence = coverage × mean evidence quality (0.85 terrain, 0.7 categorical, 0.6 thermal, 0.75 solar).
+Missing dimensions are dropped, listed as such, and coverage decreases. Confidence = coverage × mean evidence quality (0.85 terrain, 0.7 categorical, 0.6 thermal, 0.75 luminosity).
 
 ### 4.3 Categorical affinities
 
@@ -255,7 +268,7 @@ The eight requested categories are built from the comparable similarity dimensio
 | --- | --- | --- |
 | Geology, mineralogy & surface materials | surface material affinity | assessed, categorical only |
 | Terrain, elevation, slope, roughness & craters | slope + roughness | assessed; elevation offset and crater populations not scored |
-| Temperature, illumination & environmental extremes | mean temperature + diurnal amplitude + solar fraction | assessed |
+| Temperature, illumination & environmental extremes | mean temperature + diurnal amplitude + luminosity | assessed |
 | Water, ice, permafrost & potential resources | volatile-setting affinity | assessed, not water quantity |
 | Dust, wind, erosion & atmospheric / surface processes | none | **unassessed** |
 | Biology, extremophiles, habitability & biosignatures | none | **unassessed** |
@@ -264,7 +277,9 @@ The eight requested categories are built from the comparable similarity dimensio
 
 A group grade is the effective-weight-weighted mean of its available dimension similarities, converted with the same letter bands. Groups without comparable data are shown as “not assessed” and are not replaced with an estimate. The operations group is explicitly partial because gravity, pressure, radiation, dust and site infrastructure are excluded. The overall grade remains the full seven-dimension similarity score; no extra weighting is applied for the eight display groups.
 
-The Moon/Mars analog interface reports only the **top five** Earth candidates. The Earth candidate list reports each site’s best planetary match and overall grade after the live pool has been measured.
+Every factor is displayed as a grade-coloured 0–100 bar. Mission factors use their weighted sub-scores; head-to-head dimensions use their similarity score. Every Earth pin also carries the overall 0–100 similarity estimate computed from all available comparable dimensions, either against the retained Mars/Moon target or against its best match among all 31 curated planetary sites when no target is armed. Pin labels show the grade and score; a missing dimension lowers coverage and is never filled with an inferred value. Missing bars are dashed and labelled “Data unavailable”, never filled with an assumed value. The last explicitly selected Moon/Mars site is retained as the comparison target. Clicking an Earth candidate then computes a direct comparison with that target; the independent “closest overall match” grade remains visible for context. The less-studied candidate shortlist is a statistical ranking within the curated pool, not a discovery claim.
+
+The Moon/Mars analog interface reports and compares only the **top five** Earth candidates. Twin Mode rejects off-list points; its compare-and-contrast matrix has exactly five site columns. The Earth candidate list reports each site’s best planetary match and overall grade after the live pool has been measured. The matrix uses every comparable dimension plus Earth albedo, aridity and elevation as context; the context rows are not added to the similarity score.
 
 ### 4.8 Brightness factors
 

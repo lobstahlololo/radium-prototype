@@ -14,8 +14,8 @@ import { EARTH_ANALOGS } from './data/analogs.js';
 import { getDataset } from './data/datasets.js';
 import { MISSION_PROFILES, FACTORS, computeSuitability, profileForBody, weightShares } from './science/suitability.js';
 import { letterGrade, gradeMeta, confidenceLabel, round, UNRATED, fmt } from './science/grade.js';
-import { comparePair, rankAnalogs, rankPlanetMatches, earthFactorGrades, SIMILARITY_DIMENSIONS } from './science/similarity.js';
-import { effectiveSolar, marsPressureKPa } from './science/solar.js';
+import { comparePair, rankAnalogs, rankPlanetMatches, earthFactorGrades, discoverNewAnalogs, SIMILARITY_DIMENSIONS } from './science/similarity.js';
+import { effectiveSolar, marsPressureKPa, meanSurfaceIrradiance } from './science/solar.js';
 import { loadDem } from './science/terrain.js';
 import { buildTerrainRaster, TERRAIN_LAYERS } from './maps/dem-layer.js';
 import { PlanetGlobe } from './maps/globe.js';
@@ -61,7 +61,12 @@ const state = {
   earthPoolRatingPromise: null,
   planetMatchPool: null,
   planetMatchPoolPromise: null,
-  twin: { active: false, planetSiteId: null, rankings: [], measuredCount: 0, selectedAnalogId: null, compare: null, custom: null },
+  twin: { active: false, planetSiteId: null, rankings: [], allRankings: [], measuredCount: 0, selectedAnalogId: null, compare: null, custom: null },
+  lastPlanetContext: null,
+  earthCompare: null,
+  earthRankings: [],
+  earthDiscovery: [],
+  targetRankings: { key: null, pool: null, rows: [], byId: new Map() },
   lastRecalc: null,
   loading: null,
 };
@@ -203,6 +208,7 @@ async function rateEarthPool() {
   } finally {
     state.earthPoolRatingPromise = null;
     if (state.body === 'earth' && !state.twin.active) {
+      if (state.selection?.kind === 'earth') syncEarthComparison(state.selection.profile);
       renderCandidates();
       updateEarthMarkers();
       if (state.selection?.kind === 'earth') renderInspector();
@@ -277,8 +283,62 @@ function formatDimValue(id, value) {
   if (id === 'thermalMean' || id === 'thermalAmp') return `${Math.round(value)} K`;
   if (id === 'slope') return `${round(value, 1)}°`;
   if (id === 'roughness') return `${Math.round(value)} m σ`;
-  if (id === 'solar') return `${pct(value, 1)} of solar constant`;
+  if (id === 'luminosity') return `${Math.round(value)} W/m²`;
   return humanize(value);
+}
+
+/** The last explicitly selected Moon/Mars site, retained across body switches. */
+function planetContextAssessment() {
+  const ctx = state.lastPlanetContext;
+  if (!ctx) return null;
+  const site = (BODY_SITES[ctx.body] || []).find((s) => s.id === ctx.siteId);
+  const dem = state.dems[ctx.body];
+  if (!site || !dem) return null;
+  return { site, terrain: dem.sample(site.lat, site.lon), body: ctx.body };
+}
+
+/**
+ * Computes the explicit head-to-head selected by the user: a Moon/Mars site
+ * chosen before switching to Earth, plus the Earth site they just clicked.
+ * This is deliberately separate from the inverse "best planetary match" grade.
+ */
+/**
+ * Scores every curated Earth candidate against the retained planetary target.
+ * The cache is keyed by target and pool identity; all comparable measurements
+ * contribute through comparePair, and no missing dimension is inferred.
+ */
+function targetRankingsFor() {
+  const planet = planetContextAssessment();
+  if (!planet || state.earthPoolState !== 'ready' || !state.earthPool.length) return null;
+  const key = `${planet.body}:${planet.site.id}`;
+  if (state.targetRankings.key !== key || state.targetRankings.pool !== state.earthPool) {
+    const rows = rankAnalogs(planet, state.earthPool.filter((p) => p.climate || p.terrain));
+    state.targetRankings = {
+      key,
+      pool: state.earthPool,
+      planet,
+      rows,
+      byId: new Map(rows.map((row) => [row.earthId, row])),
+    };
+  }
+  return state.targetRankings;
+}
+
+function syncEarthComparison(profile) {
+  if (state.twin.active) return null;
+  const planet = planetContextAssessment();
+  if (!planet) {
+    state.earthCompare = null;
+    state.earthRankings = [];
+    state.earthDiscovery = [];
+    return null;
+  }
+  const compare = { ...comparePair(planet, profile), planetSite: planet.site, planetBody: planet.body };
+  state.earthCompare = compare;
+  const ranking = targetRankingsFor();
+  state.earthRankings = ranking?.rows || [];
+  state.earthDiscovery = ranking ? discoverNewAnalogs(ranking.rows.slice(0, 5), state.earthPool, 3) : [];
+  return compare;
 }
 
 /* --------------------------------------------------------------- assessment */
@@ -426,8 +486,14 @@ async function ensureEarthMap() {
 
 function updateEarthMarkers() {
   if (!state.earthMap) return;
+  const customProfile = state.twin.active
+    ? (state.twin.custom?.id === 'custom-earth-point' ? state.twin.custom : null)
+    : (state.selection?.kind === 'earth' && state.selection.custom ? state.selection.profile : null);
+  const customCompare = state.twin.active ? state.twin.compare : state.earthCompare;
+  const targetRanking = state.twin.active ? null : targetRankingsFor();
+  let items;
   if (state.twin.active) {
-    const items = state.twin.rankings
+    items = state.twin.rankings
       .map((r) => {
         const analog = EARTH_ANALOGS.find((a) => a.id === r.earthId);
         if (!analog) return null;
@@ -438,31 +504,57 @@ function updateEarthMarkers() {
           lat: analog.lat,
           lon: analog.lon,
           grade: r.grade,
+          score: r.score,
           selected: state.twin.selectedAnalogId === analog.id,
           established: analog.established,
         };
       })
       .filter(Boolean);
-    state.earthMap.setMarkers(items, (id) => selectEarthAnalog(id));
   } else {
-    state.earthMap.setMarkers(
-      EARTH_ANALOGS.map((a) => ({
+    items = EARTH_ANALOGS.map((a) => {
+      const targetMatch = targetRanking?.byId.get(a.id);
+      const bestMatch = state.earthMatches[a.id]?.[0];
+      return {
         id: a.id,
         name: a.name,
         country: a.country,
         lat: a.lat,
         lon: a.lon,
-        grade: state.earthMatches[a.id]?.[0]?.grade ?? UNRATED,
+        grade: targetMatch?.grade ?? bestMatch?.grade ?? UNRATED,
+        score: targetMatch?.score ?? bestMatch?.score ?? null,
         selected: state.selection?.kind === 'earth' && state.selection.profile?.id === a.id,
-      })),
-      (id) => selectEarthAnalog(id),
-    );
+      };
+    });
   }
+  if (customProfile) {
+    items.push({
+      id: customProfile.id,
+      name: 'Clicked Earth point',
+      country: 'user-selected coordinate',
+      lat: customProfile.lat,
+      lon: customProfile.lon,
+      grade: customCompare?.earthId === customProfile.id ? customCompare.grade : UNRATED,
+      score: customCompare?.earthId === customProfile.id ? customCompare.score : null,
+      selected: true,
+      established: false,
+    });
+  }
+  state.earthMap.setMarkers(items, (id) => {
+    if (id === customProfile?.id) {
+      applyCustomEarthProfile(customProfile);
+      return;
+    }
+    selectEarthAnalog(id);
+  });
 }
 
 async function selectEarthAnalog(id) {
   const analog = EARTH_ANALOGS.find((a) => a.id === id);
   if (!analog) return;
+  if (state.twin.active && !state.twin.rankings.some((row) => row.earthId === id)) {
+    toast('Twin comparison is limited to the top five ranked candidates. Choose one of those five pins.', 'warn');
+    return;
+  }
   const cached = state.earthPool.find((p) => p.id === id);
   if (cached) {
     state.selection = { kind: 'earth', profile: cached, custom: false };
@@ -470,8 +562,10 @@ async function selectEarthAnalog(id) {
       setTwinComparison(cached);
       state.selection = { kind: 'twin', analogId: id };
     } else {
+      syncEarthComparison(cached);
       queueEarthMatch(cached);
     }
+    renderCandidates();
     renderInspector();
     updateEarthMarkers();
     state.earthMap?.flyTo(analog.lat, analog.lon, 4.5);
@@ -487,23 +581,42 @@ async function selectEarthAnalog(id) {
       setTwinComparison(profile);
       state.selection = { kind: 'twin', analogId: id };
     } else {
+      syncEarthComparison(profile);
       queueEarthMatch(profile);
     }
   } catch (err) {
     state.selection = { kind: 'earth-error', name: analog.name, message: err.message };
   }
+  renderCandidates();
+  renderInspector();
+  updateEarthMarkers();
+}
+
+function applyCustomEarthProfile(profile) {
+  if (state.twin.active) {
+    toast('Twin comparison is limited to the top five ranked candidates. Choose one of those five pins.', 'warn');
+    return;
+  }
+  state.selection = { kind: 'earth', profile, custom: true };
+  syncEarthComparison(profile);
+  queueEarthMatch(profile);
   renderInspector();
   updateEarthMarkers();
 }
 
 async function onEarthPick({ lat, lon }) {
+  if (state.twin.active) {
+    setCoordReadout(lat, lon, 'Earth');
+    toast('Twin comparison is limited to the top five ranked candidates. Click one of the five highlighted pins.', 'warn');
+    return;
+  }
   if (state.body === 'earth') setCoordReadout(lat, lon, 'Earth');
-  state.selection = { kind: 'earth-loading', lat, lon, name: 'Custom Earth point' };
+  state.selection = { kind: 'earth-loading', lat, lon, name: 'Clicked Earth point' };
   renderInspector();
   try {
     const profile = await buildEarthProfile({
       id: 'custom-earth-point',
-      name: 'Custom Earth point',
+      name: 'Clicked Earth point',
       country: '',
       lat: Number(lat.toFixed(3)),
       lon: Number(lon.toFixed(3)),
@@ -512,19 +625,12 @@ async function onEarthPick({ lat, lon }) {
       established: false,
       landform: 'User-selected coordinate',
     });
-    state.selection = { kind: 'earth', profile, custom: true };
-    if (state.twin.active && selectedAssessment()) {
-      const planet = selectedAssessment();
-      state.twin.compare = comparePair({ site: planet.site, terrain: planet.terrain, body: state.body }, profile);
-      state.twin.custom = profile;
-    } else {
-      queueEarthMatch(profile);
-    }
+    applyCustomEarthProfile(profile);
   } catch (err) {
-    state.selection = { kind: 'earth-error', name: 'Custom Earth point', message: err.message };
+    state.selection = { kind: 'earth-error', name: 'Clicked Earth point', message: err.message };
+    renderInspector();
+    updateEarthMarkers();
   }
-  renderInspector();
-  updateEarthMarkers();
 }
 
 /* --------------------------------------------------------------- selection */
@@ -533,6 +639,7 @@ function selectSite(id) {
   const body = state.body;
   const site = (BODY_SITES[body] || []).find((s) => s.id === id);
   if (!site) return;
+  state.lastPlanetContext = { body, siteId: id };
   state.selection = { kind: 'site', siteId: id };
   if (state.twin.active) {
     state.twin.planetSiteId = id;
@@ -583,6 +690,7 @@ function setCoordReadout(lat, lon, label) {
 function setTwinComparison(profile) {
   const planet = selectedAssessment();
   if (!planet) return;
+  state.twin.selectedAnalogId = profile.id;
   state.twin.compare = rankAnalogs({ site: planet.site, terrain: planet.terrain, body: state.body }, [profile])[0] || null;
   state.twin.custom = null;
 }
@@ -591,6 +699,7 @@ function computeTwinRankings() {
   const planet = selectedAssessment();
   if (!planet || state.earthPoolState !== 'ready') {
     state.twin.rankings = [];
+    state.twin.allRankings = [];
     return;
   }
   const ranked = rankAnalogs(
@@ -598,6 +707,7 @@ function computeTwinRankings() {
     state.earthPool.filter((p) => p.climate || p.terrain),
   );
   state.twin.measuredCount = ranked.length;
+  state.twin.allRankings = ranked;
   state.twin.rankings = ranked.slice(0, 5);
 }
 
@@ -637,6 +747,7 @@ async function activateTwin() {
 function deactivateTwin() {
   state.twin.active = false;
   state.twin.rankings = [];
+  state.twin.allRankings = [];
   state.twin.measuredCount = 0;
   state.twin.selectedAnalogId = null;
   state.twin.compare = null;
@@ -834,7 +945,7 @@ function renderCandidates() {
         return `<button type="button" class="candidate-row ${r.earthId === state.twin.selectedAnalogId ? 'is-selected' : ''}" data-analog="${r.earthId}">
           <span class="rank">${String(i + 1).padStart(2, '0')}</span>
           <span class="cand-main"><strong>${esc(r.earthName)}</strong><em>${esc(analog?.country || '')}${analog && !analog.established ? ' · less-studied candidate' : ''}</em></span>
-          <span class="cand-strength">${top ? `${esc(top.label)} ${pct(top.similarity)}` : 'Limited overlap'}</span>
+          <span class="cand-strength">${Math.round(r.score)}/100 · ${top ? `${esc(top.label)} ${pct(top.similarity)}` : 'limited overlap'}</span>
           ${gradeChip(r.grade)}
         </button>`;
       })
@@ -843,28 +954,35 @@ function renderCandidates() {
   }
 
   if (state.body === 'earth') {
-    title.textContent = 'Earth analog grades';
+    const target = targetRankingsFor();
+    title.textContent = 'Earth similarity estimates';
     kicker.textContent =
       state.earthPoolRatingState === 'loading'
         ? 'rating Earth sites…'
         : state.earthPoolState === 'loading'
           ? 'live climate loading…'
-          : 'overall + 8 factors';
+          : target?.planet
+            ? `vs ${target.planet.site.name}`
+            : 'best of 31 planetary sites';
     bodyEl.innerHTML = EARTH_ANALOGS.map(
       (a, i) => {
+        const targetMatch = target?.byId.get(a.id);
         const best = state.earthMatches[a.id]?.[0];
-        const strength = best
-          ? `Mimics ${best.planetSite.name}`
-          : state.earthPoolState === 'loading' || state.earthPoolRatingState === 'loading'
-            ? 'Measuring…'
-            : state.earthMatchErrors[a.id]
-              ? 'Match unavailable'
-              : 'Open to rate';
+        const score = targetMatch?.score ?? best?.score ?? null;
+        const strength = targetMatch
+          ? `${Math.round(targetMatch.score)}/100 vs ${target.planet.site.name}`
+          : best
+            ? `${Math.round(best.score)}/100 · mimics ${best.planetSite.name}`
+            : state.earthPoolState === 'loading' || state.earthPoolRatingState === 'loading'
+              ? 'Measuring…'
+              : state.earthMatchErrors[a.id]
+                ? 'Match unavailable'
+                : 'Open to rate';
         return `<button type="button" class="candidate-row ${state.selection?.kind === 'earth' && state.selection.profile?.id === a.id ? 'is-selected' : ''}" data-analog="${a.id}">
           <span class="rank">${String(i + 1).padStart(2, '0')}</span>
           <span class="cand-main"><strong>${esc(a.name)}</strong><em>${esc(a.country)} · ${humanize(a.substrateGroup)}</em></span>
           <span class="cand-strength">${esc(strength)}</span>
-          ${gradeChip(best?.grade ?? UNRATED)}
+          ${gradeChip(targetMatch?.grade ?? best?.grade ?? UNRATED)}
         </button>`;
       },
     ).join('');
@@ -897,8 +1015,11 @@ function renderStageChrome() {
     title.textContent = `${bodyMeta.label} ↔ Earth`;
     sub.textContent = 'Earth Twin Mode · top five terrestrial analogs for the selected planetary site';
   } else if (state.body === 'earth') {
+    const target = planetContextAssessment();
     title.textContent = 'Earth';
-    sub.textContent = 'NASA GIBS layers · overall analog grade and eight-factor profile from live climate and DEM data';
+    sub.textContent = target
+      ? `NASA GIBS layers · click any pin or map point to compare with ${target.site.name}`
+      : 'NASA GIBS layers · 0–100 similarity estimates from live climate and DEM data';
   } else {
     title.textContent = `${bodyMeta.label} · ${MISSION_PROFILES[state.missionId]?.label || ''}`;
     sub.textContent = 'Click a grade pin or anywhere on the surface for measurements';
@@ -960,10 +1081,11 @@ function renderLegend() {
     return;
   }
 
+  const target = earthActive ? planetContextAssessment() : null;
   el.innerHTML = `
-    <div class="legend-head"><span>${earthActive ? 'Earth analog pins' : 'Site suitability'}</span><em>letters</em></div>
+    <div class="legend-head"><span>${earthActive ? (target ? `Earth scores vs ${target.site.name}` : 'Earth similarity estimates') : 'Site suitability'}</span><em>${earthActive ? '0–100' : 'letters'}</em></div>
     <div class="legend-grades">${['A', 'B', 'C', 'D', 'F'].map((g) => `${gradeChip(g)}<span>${gradeMeta(g).label}</span>`).join('')}</div>
-    <p class="legend-note">${earthActive ? 'Pin letters are Earth analog grades. Twin Mode shows the top five matches; Earth view shows each site’s best planetary match.' : 'Letter grades from the weighted mission assessment. Hover a pin for its name; click for evidence.'}</p>`;
+    <p class="legend-note">${earthActive ? 'Each pin is scored from every available comparable measurement; labels show grade and the 0–100 similarity estimate. Twin Mode shows the top five matches, and clicking any pin or map point compares that exact location.' : 'Letter grades from the weighted mission assessment. Hover a pin for its name; click for evidence.'}</p>`;
 }
 
 function resizeMaps() {
@@ -1063,6 +1185,82 @@ function scheduleThumb() {
   }
 }
 
+/** One grade-coloured 0–100 bar used by mission factors and similarity dimensions. */
+function systemBar({ labelHtml, grade, score, number, value, meta, detail = '', missing = false }) {
+  const width = score === null || score === undefined ? 0 : Math.max(0, Math.min(100, score));
+  return `<div class="system-bar grade-${grade && grade !== UNRATED ? grade : 'U'}${missing ? ' is-missing' : ''}" title="${esc(detail)}">
+    <div class="bar-head">
+      <span class="bar-label">${labelHtml}</span>
+      <span class="bar-number">${number}${grade && grade !== UNRATED ? `<span class="grade-chip grade-${grade}">${grade}</span>` : ''}</span>
+    </div>
+    <div class="bar-track"><span class="bar-fill" style="width:${width.toFixed(1)}%"></span></div>
+    <div class="bar-foot"><span>${value}</span><span>${meta}</span></div>
+  </div>`;
+}
+
+function renderFactorBars(factors) {
+  return `<div class="system-bars">${factors
+    .map((f) => systemBar({
+      labelHtml: `${esc(f.label)}${evidenceChip(f.evidence)}`,
+      grade: f.available ? letterGrade(f.score) : null,
+      score: f.available ? f.score : null,
+      number: f.available ? Math.round(f.score) : '—',
+      value: f.available
+        ? `${esc(typeof f.raw === 'number' ? round(f.raw, f.unit === '°' ? 1 : 1) : humanize(f.raw))} <small>${esc(f.unit || '')}</small>`
+        : '<span class="na">Data unavailable.</span>',
+      meta: f.available ? `${pct(f.effectiveWeight)} of mission weight` : 'Not weighted',
+      detail: f.detail,
+      missing: !f.available,
+    }))
+    .join('')}</div>`;
+}
+
+function renderDiscoveryBlock(candidates) {
+  if (!candidates.length) return '';
+  return `<section class="panel-section">
+    <div class="section-head"><h3>Less-studied in the top five</h3><span class="fine">data-driven</span></div>
+    <div class="discovery-list">
+      ${candidates
+        .map((c, i) => `<button type="button" class="discovery-row ${c.earthId === state.selection?.profile?.id || c.earthId === state.twin.selectedAnalogId ? 'is-selected' : ''}" data-action="open-analog" data-analog="${c.earthId}">
+          <span class="rank">${String(i + 1).padStart(2, '0')}</span>
+          <span class="discovery-main"><strong>${esc(c.earth.name)}</strong><em>${esc(c.earth.country)} · ${esc(c.why)}</em></span>
+          <span class="discovery-score">${Math.round(c.score)}${gradeChip(c.grade)}</span>
+        </button>`)
+        .join('')}
+    </div>
+    <p class="fine">Only less-studied candidates that earned a place in the top five are shown. This is a statistical shortlist, not a newly discovered field site or confirmed mission analog. Established analog sites are excluded here on purpose.</p>
+  </section>`;
+}
+
+function renderTopFiveComparison() {
+  const rows = (state.twin.active ? state.twin.rankings : targetRankingsFor()?.rows || []).slice(0, 5);
+  if (rows.length < 2) return '';
+  const planet = state.twin.active ? selectedAssessment() : planetContextAssessment();
+  if (!planet) return '';
+  const profiles = new Map(state.earthPool.map((p) => [p.id, p]));
+  const contextCell = (value, suffix = '', digits = 0) => Number.isFinite(value) ? `${round(value, digits)}${suffix}` : '<span class="na">Data unavailable.</span>';
+  return `<section class="panel-section">
+    <div class="section-head"><h3>Top 5 compare &amp; contrast</h3><span class="fine">only these five compared</span></div>
+    <div class="table-scroll"><table class="top-five-table">
+      <thead><tr><th>Metric</th>${rows.map((r, i) => `<th><span>#${i + 1}</span>${esc(r.earthName)}</th>`).join('')}</tr></thead>
+      <tbody>
+        <tr><th>Similarity score</th>${rows.map((r) => `<td><span class="top-five-score">${Math.round(r.score)}</span> ${gradeChip(r.grade)}<div class="top-five-mini"><span style="width:${Math.round(r.score)}%"></span></div></td>`).join('')}</tr>
+        <tr><th>Coverage</th>${rows.map((r) => `<td>${pct(r.coverage)}</td>`).join('')}</tr>
+        ${SIMILARITY_DIMENSIONS.map((def) => `<tr><th>${esc(def.label)}</th>${rows.map((r) => {
+          const d = r.dimensions.find((x) => x.id === def.id);
+          return `<td>${d?.available ? `${formatDimValue(d.id, d.earthValue)}<span>${pct(d.similarity)} match</span>` : '<span class="na">Data unavailable.</span>'}</td>`;
+        }).join('')}</tr>`).join('')}
+        <tr><th>Earth albedo</th>${rows.map((r) => `<td>${contextCell(profiles.get(r.earthId)?.climate?.albedo !== null && profiles.get(r.earthId)?.climate?.albedo !== undefined ? profiles.get(r.earthId).climate.albedo * 100 : null, '%', 1)}</td>`).join('')}</tr>
+        <tr><th>Aridity index</th>${rows.map((r) => `<td>${contextCell(profiles.get(r.earthId)?.climate?.aridityIndex, '', 2)}</td>`).join('')}</tr>
+        <tr><th>Elevation</th>${rows.map((r) => `<td>${contextCell(profiles.get(r.earthId)?.terrain?.elevationM, ' m')}</td>`).join('')}</tr>
+        <tr><th>Strongest overlap</th>${rows.map((r) => `<td>${r.strong[0] ? `${esc(r.strong[0].label)}<span>${pct(r.strong[0].similarity)}</span>` : '<span class="na">None above threshold.</span>'}</td>`).join('')}</tr>
+        <tr><th>Weakest overlap</th>${rows.map((r) => `<td>${r.weak[0] ? `${esc(r.weak[0].label)}<span>${pct(r.weak[0].similarity)}</span>` : '<span class="na">None below threshold.</span>'}</td>`).join('')}</tr>
+      </tbody>
+    </table></div>
+    <p class="fine">Against <strong>${esc(planet.site.name)}</strong>. The matrix uses every comparable measurement held for both sides; albedo, aridity and elevation are Earth context and are not added to the similarity score. No sixth candidate is included.</p>
+  </section>`;
+}
+
 function renderSiteInspector() {
   const row = selectedAssessment();
   if (!row) return '<p>No site selected.</p>';
@@ -1073,6 +1271,7 @@ function renderSiteInspector() {
   const profile = profileForBody(state.body, state.missionId);
   const factors = result?.factors || [];
   const availableCount = factors.filter((f) => f.available).length;
+  const irradiance = meanSurfaceIrradiance(site);
 
   return `
     <div class="inspector-head">
@@ -1099,25 +1298,12 @@ function renderSiteInspector() {
       <button type="button" class="solid-btn" data-action="twin">${state.twin.active ? 'Recompute Earth analogs' : 'Find Earth analogs'}</button>
       <button type="button" class="ghost-btn" data-action="fly">Center map</button>
     </div>
+    <p class="fine compare-armed"><strong>Earth comparison target:</strong> ${esc(site.name)} is retained. Open Earth and click any pin for a direct head-to-head.</p>
     <p class="summary">${esc(site.summary)}</p>
 
     <section class="panel-section">
-      <div class="section-head"><h3>Mission factors</h3><span class="fine">letters, not just numbers</span></div>
-      <div class="table-scroll"><table class="factor-table">
-        <thead><tr><th>Factor</th><th>Grade</th><th>Value</th><th>Weight</th></tr></thead>
-        <tbody>
-          ${factors
-            .map(
-              (f) => `<tr class="${f.available ? '' : 'row-missing'}">
-                <td><span class="factor-name">${esc(f.label)}</span>${evidenceChip(f.evidence)}</td>
-                <td>${f.available ? gradeChip(letterGrade(f.score)) : `<span class="na">${UNRATED}</span>`}</td>
-                <td class="num">${f.available ? `${esc(typeof f.raw === 'number' ? round(f.raw, f.unit === '°' ? 1 : 2) : humanize(f.raw))} <small>${esc(f.unit || '')}</small>` : `<span class="na" title="${esc(f.detail)}">Data unavailable.</span>`}</td>
-                <td class="num">${f.available ? pct(f.effectiveWeight) : '—'}</td>
-              </tr>`,
-            )
-            .join('')}
-        </tbody>
-      </table></div>
+      <div class="section-head"><h3>System factor bars</h3><span class="fine">0–100 · every mission factor</span></div>
+      ${renderFactorBars(factors)}
       <p class="fine">${esc(result?.caveat || '')}</p>
     </section>
 
@@ -1138,6 +1324,7 @@ function renderSiteInspector() {
         <div><dt>Diurnal amplitude</dt><dd>${site.tempAmpK ? `${Math.round(site.tempAmpK.value)} ± ${Math.round(site.tempAmpK.uncertainty)} K` : 'Data unavailable.'}</dd>${evidenceChip(site.tempAmpK?.evidence)}</div>
         <div><dt>Solar energy</dt><dd>${pct(solar.value, 1)} of solar constant</dd>${evidenceChip(solar.evidence)}<p>${esc(solar.note)}</p>
         ${solar.publishedIllumination ? `<p class="pub-illum">Published illumination: <b>${pct(solar.publishedIllumination.value)}</b> ± ${pct(solar.publishedIllumination.uncertainty || 0)} of the year sunlit. ${esc(solar.publishedIllumination.note || '')}</p>` : ''}</div>
+        <div><dt>Luminosity</dt><dd>${irradiance ? `${Math.round(irradiance.value)} <small>W/m²</small>` : 'Data unavailable.'}</dd>${irradiance ? evidenceChip(irradiance.evidence) : ''}<p>${esc(irradiance?.note || 'No orbital irradiance available for this body.')}</p></div>
         <div><dt>Ice / volatile evidence</dt><dd>${site.ice ? `${humanize(site.ice.class)} · index ${Math.round(site.ice.score)}/100` : 'Data unavailable.'}</dd>${evidenceChip(site.ice?.evidence)}<p>${esc(site.ice?.note || '')}</p></div>
         ${site.earthVisibility ? `<div><dt>Earth visibility</dt><dd>${pct(site.earthVisibility.value)} geometric</dd>${evidenceChip(site.earthVisibility.evidence)}<p>${esc(site.earthVisibility.note)}</p></div>` : ''}
         ${site.dustRisk ? `<div><dt>Dust exposure</dt><dd>${humanize(site.dustRisk.class)}</dd>${evidenceChip('assessment')}<p>${esc(site.dustRisk.basis)}</p></div>` : ''}
@@ -1191,18 +1378,20 @@ function renderPlanetPointInspector() {
 }
 
 function renderEarthIntro() {
+  const target = planetContextAssessment();
   return `
     <div class="inspector-head">
       <p class="eyebrow">Earth · terrestrial analogs</p>
       <h2>What does each Earth site resemble?</h2>
       <p class="lede">RADIUM rates all ${EARTH_ANALOGS.length} curated Earth candidates against every Moon and Mars site. Each gets an overall analog grade, the closest planetary match, and an eight-factor profile.</p>
     </div>
+    ${target ? `<div class="alert alert-info"><strong>Comparison target armed: ${esc(target.site.name)} (${esc(BODIES[target.body].label)}).</strong><p>Click any Earth pin — or anywhere on the map — to compare that exact location with the target on every available comparable factor.</p></div>` : `<div class="alert alert-info"><strong>Pick a comparison target first.</strong><p>Select a Moon or Mars site, then return here and click any Earth pin or map point for a direct head-to-head.</p></div>`}
     <div class="steps">
       <div><span>1</span><p>Earth sites are measured with live NASA POWER climate and Copernicus DEM terrain.</p></div>
       <div><span>2</span><p>The closest curated Moon or Mars site sets the overall match grade.</p></div>
-      <div><span>3</span><p>Open any candidate for its eight-factor profile and the gaps RADIUM does not rate.</p></div>
+      <div><span>3</span><p>Open any candidate for its eight-factor profile, factor bars and the explicit gaps RADIUM does not rate.</p></div>
     </div>
-    <p class="fine">Earth grades are analog-similarity grades, not mission-suitability grades. Select a Moon or Mars site and use Earth Twin Mode to see that site's top five terrestrial analogs.</p>
+    <p class="fine">Earth grades are analog-similarity grades, not mission-suitability grades. Every pin carries a 0–100 estimate computed from all available comparable measurements. The last planetary site you selected becomes the comparison target for every pin and map click.</p>
     <div class="action-row"><button type="button" class="solid-btn" data-action="go-moon">Choose a lunar site</button><button type="button" class="ghost-btn" data-action="go-mars">Choose a Mars site</button></div>
     <p class="caveat">${MISSION_CAVEAT}</p>`;
 }
@@ -1240,7 +1429,7 @@ function renderEarthFactorSection(compare) {
             <div class="earth-factor-copy">
               <div class="earth-factor-title"><strong>${esc(f.label)}</strong>${f.available && !f.partial ? '' : `<span class="factor-status">${f.available ? 'partial' : 'not assessed'}</span>`}</div>
               <p>${esc(f.available ? f.note : f.unratedReason)}</p>
-              ${f.available ? `<span class="dim-weight">${pct(f.coverage)} of match weight</span>` : ''}
+              ${f.available ? `<div class="earth-factor-bar"><span style="width:${(f.similarity * 100).toFixed(1)}%"></span></div><span class="dim-weight">${Math.round(f.similarity * 100)}/100 similarity · ${pct(f.coverage)} of match weight</span>` : '<span class="dim-weight">No bar issued: data unavailable</span>'}
             </div>
           </article>`,
         )
@@ -1271,6 +1460,9 @@ function renderEarthInspector() {
   const best = matches[0] || null;
   const pending = state.earthMatchPromises.has(key);
   const matchError = state.earthMatchErrors[key];
+  const explicit = state.earthCompare?.earthId === profile.id ? state.earthCompare : null;
+  const hero = explicit || best;
+  const target = explicit ? { site: explicit.planetSite, body: explicit.planetBody } : null;
   return `
     <div class="inspector-head">
       <p class="eyebrow">Earth · ${esc(profile.country || 'custom coordinate')}</p>
@@ -1279,12 +1471,14 @@ function renderEarthInspector() {
     </div>
     ${contextFigure()}
     ${profile.dataIssue ? `<div class="alert alert-warn"><strong>Partial data.</strong> ${esc(profile.dataIssue)}</div>` : ''}
-    ${best ? `<div class="grade-hero grade-${best.grade}">
-      <div class="grade-orb">${best.grade}</div>
-      <div class="grade-copy"><p class="grade-label">Overall analog grade</p>
-      <p class="grade-sub">Mimics <strong>${esc(best.planetSite.name)}</strong> · ${esc(BODIES[best.planetBody]?.label || best.planetBody)}</p>
-      <div class="chip-row"><span class="pill">Coverage ${pct(best.coverage)}</span><span class="pill">Confidence ${confidenceLabel(best.confidence)}</span></div></div>
-    </div>` : pending ? `<div class="alert alert-info"><strong>Rating this Earth site…</strong> Loading both planetary DEMs and comparing against every curated Moon and Mars site. The live measurements below are already available.</div>` : matchError ? `<div class="alert alert-warn"><strong>Planetary match unavailable.</strong> ${esc(matchError)}</div>` : `<div class="alert alert-info"><strong>No comparable planetary match.</strong> The available measurements do not overlap enough with a curated planetary site to issue a grade.</div>`}
+    ${hero ? `<div class="grade-hero grade-${hero.grade}">
+      <div class="grade-orb">${hero.grade}</div>
+      <div class="grade-copy"><p class="grade-label">${explicit ? 'Head-to-head analog grade' : 'Overall analog grade'}</p>
+      <p class="grade-sub">${explicit ? `Compared with <strong>${esc(explicit.planetSite.name)}</strong> · ${esc(BODIES[explicit.planetBody]?.label || explicit.planetBody)}` : `Mimics <strong>${esc(best.planetSite.name)}</strong> · ${esc(BODIES[best.planetBody]?.label || best.planetBody)}`}</p>
+      <div class="chip-row"><span class="pill">Score ${Math.round(hero.score)}/100</span><span class="pill">Coverage ${pct(hero.coverage)}</span><span class="pill">Confidence ${confidenceLabel(hero.confidence)}</span></div></div>
+    </div>${explicit ? `<p class="fine">This is your selected comparison, not the closest overall match. The closest curated planetary match remains listed below for context.</p>` : ''}` : pending ? `<div class="alert alert-info"><strong>Rating this Earth site…</strong> Loading both planetary DEMs and comparing against every curated Moon and Mars site. The live measurements below are already available.</div>` : matchError ? `<div class="alert alert-warn"><strong>Planetary match unavailable.</strong> ${esc(matchError)}</div>` : `<div class="alert alert-info"><strong>No comparable planetary match.</strong> The available measurements do not overlap enough with a curated planetary site to issue a grade.</div>`}
+    ${target ? `<p class="fine compare-target"><strong>Comparison target:</strong> ${esc(target.site.name)} · ${esc(BODIES[target.body].label)}. The bars below compare this Earth site directly with that selection.</p>` : ''}
+    ${renderTopFiveComparison()}
     ${c ? `<dl class="metric-list">
       <div><dt>Mean air temperature</dt><dd>${c.tempMeanK} K <small>(${c.tempMeanC} °C)</small></dd>${evidenceChip('derived')}<p>${esc(c.tempType)}</p></div>
       <div><dt>Mean diurnal range</dt><dd>${c.diurnalAmpK ?? 'Data unavailable.'} K</dd><p>Daily max−min of 2 m air temperature, averaged over ${c.period}.</p></div>
@@ -1292,6 +1486,7 @@ function renderEarthInspector() {
       <div><dt>Reference evapotranspiration</dt><dd>${c.et0Mm ?? 'Data unavailable.'} mm</dd></div>
       <div><dt>Aridity index</dt><dd>${c.aridityIndex ?? 'Data unavailable.'} <small>P/PET₀</small></dd><p>Lower values indicate more arid conditions; above 1, precipitation exceeds estimated demand. ${esc(c.et0Method || 'Reference ET₀')}.</p></div>
       <div><dt>Solar resource</dt><dd>${c.solarFraction !== null ? pct(c.solarFraction, 1) : 'Data unavailable.'} of solar constant</dd><p>Annual mean surface shortwave radiation divided by the 24-hour solar constant — the same physical quantity used for planetary sites.</p></div>
+      <div><dt>Luminosity</dt><dd>${Number.isFinite(c.solarFraction) ? `${Math.round(c.solarFraction * 1361)} <small>W/m²</small>` : 'Data unavailable.'}</dd><p>Absolute mean surface shortwave irradiance from POWER, calculated as annual solar fraction × 1361 W/m². Modelled/reanalysis, not a local pyranometer.</p></div>
     </dl>` : `<div class="alert alert-warn"><strong>Climate data unavailable.</strong> Climate normals could not be retrieved for this point. Thermal and solar similarity cannot be computed.</div>`}
     ${c ? renderBrightnessFactors(c) : ''}
     ${t ? `<section class="panel-section"><div class="section-head"><h3>Terrain</h3><span class="fine">${esc(t.datasetLabel)}</span></div>
@@ -1301,8 +1496,10 @@ function renderEarthInspector() {
         <div><dt>Roughness</dt><dd>${t.roughnessM} <small>m σ</small></dd><span>${t.windowKm} km window</span></div>
         <div><dt>Sampling</dt><dd>${t.resolutionKm} <small>km</small></dd><span>9-point grid</span></div>
       </dl></section>` : '<p class="na">Elevation grid unavailable for this point.</p>'}
+    ${explicit ? renderComparisonBlock(explicit) : ''}
+    ${explicit ? renderDiscoveryBlock(state.earthDiscovery) : ''}
     ${renderMimicBlock(matches)}
-    ${best ? renderEarthFactorSection(best) : ''}
+    ${hero ? renderEarthFactorSection(hero) : ''}
     ${profile.geologyBasis ? `<section class="panel-section"><div class="section-head"><h3>Geology</h3></div><p>${esc(profile.geologyBasis)}</p><p class="fine"><strong>Analog status.</strong> ${profile.established ? 'Established planetary analog in published research.' : 'Less-studied candidate: this match is data-driven, not an established field analog.'}</p>${profile.protection ? `<p class="fine"><strong>Access.</strong> ${esc(profile.protection)}</p>` : ''}</section>` : ''}
     <section class="panel-section"><div class="section-head"><h3>Sources</h3></div>
       <ul class="source-list">${sourceLinks(['nasa_power', 'era5', 'copernicus_dem', 'gibs_blue_marble'])}</ul>
@@ -1322,6 +1519,8 @@ function renderTwinInspector() {
   const profile = state.earthPool.find((p) => p.id === analogId) || state.twin.custom;
   const compare = state.twin.compare && state.twin.compare.earthId === analogId ? state.twin.compare : profile ? comparePair({ site: planet.site, terrain: planet.terrain, body: state.body }, profile) : null;
   if (!compare || !profile) return `<div class="empty-state"><p>Earth measurements for this candidate are unavailable, so no similarity grade can be issued.</p></div>`;
+  const isCustom = profile.id === 'custom-earth-point';
+  const discoveries = discoverNewAnalogs(state.twin.rankings, state.earthPool, 3);
 
   return `
     <div class="inspector-head">
@@ -1337,11 +1536,13 @@ function renderTwinInspector() {
       <div class="grade-orb">${compare.grade}</div>
       <div class="grade-copy">
         <p class="grade-label">${gradeMeta(compare.grade).label} Earth analog</p>
-        <p class="grade-sub">${esc(profile.country || 'Earth')} · ${profile.established ? 'established analog' : 'less-studied data-driven candidate'}</p>
-        <div class="chip-row"><span class="pill">Coverage ${pct(compare.coverage)}</span><span class="pill">Confidence ${confidenceLabel(compare.confidence)}</span></div>
+        <p class="grade-sub">${isCustom ? 'Clicked Earth coordinate · not a curated candidate' : `${esc(profile.country || 'Earth')} · ${profile.established ? 'established analog' : 'less-studied data-driven candidate'}`}</p>
+        <div class="chip-row"><span class="pill">Score ${Math.round(compare.score)}/100</span><span class="pill">Coverage ${pct(compare.coverage)}</span><span class="pill">Confidence ${confidenceLabel(compare.confidence)}</span></div>
       </div>
     </div>
     <p class="fine">Similarity is not equivalence. The grade measures how closely available characteristics align — not whether this site reproduces planetary conditions.</p>
+    ${renderTopFiveComparison()}
+    ${renderDiscoveryBlock(discoveries)}
     ${compare.applications.length ? `<section class="panel-section"><div class="section-head"><h3>Scientific applications</h3></div><ul class="app-list">${compare.applications.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></section>` : ''}
     ${renderComparisonBlock(compare)}
     <section class="panel-section"><div class="section-head"><h3>Planet-side evidence</h3></div>
@@ -1354,22 +1555,21 @@ function renderTwinInspector() {
 function renderComparisonBlock(compare) {
   return `
     <section class="panel-section">
-      <div class="section-head"><h3>Dimension comparison</h3><span class="fine">letter-graded</span></div>
-      <div class="table-scroll"><table class="compare-table">
-        <thead><tr><th>Dimension</th><th>${esc(BODIES[state.body]?.label || 'Planet')}</th><th>Earth</th><th>Match</th></tr></thead>
-        <tbody>
-          ${compare.dimensions
-            .map(
-              (d) => `<tr class="${d.available ? '' : 'row-missing'}">
-                <td>${esc(d.label)}<span class="dim-weight">${d.available ? pct(d.effectiveWeight) : 'dropped'}</span></td>
-                <td>${formatDimValue(d.id, d.planetValue)}</td>
-                <td>${formatDimValue(d.id, d.earthValue)}</td>
-                <td>${d.available ? gradeChip(d.grade) : `<span class="na">${UNRATED}</span>`}</td>
-              </tr>`,
-            )
-            .join('')}
-        </tbody>
-      </table></div>
+      <div class="section-head"><h3>Every factor, head-to-head</h3><span class="fine">0–100 match bars</span></div>
+      <div class="system-bars">
+        ${compare.dimensions
+          .map((d) => systemBar({
+            labelHtml: esc(d.label),
+            grade: d.grade,
+            score: d.available ? d.similarity * 100 : null,
+            number: d.available ? Math.round(d.similarity * 100) : '—',
+            value: `${formatDimValue(d.id, d.planetValue)} <span class="arrow">→</span> ${formatDimValue(d.id, d.earthValue)}`,
+            meta: d.available ? `${pct(d.effectiveWeight)} of match weight` : 'Dropped — no comparable data',
+            detail: d.note,
+            missing: !d.available,
+          }))
+          .join('')}
+      </div>
       <div class="match-lists">
         <div><h4>Strong matches</h4>${compare.strong.length ? `<ul>${compare.strong.map((d) => `<li><b>${esc(d.label)}</b> · ${pct(d.similarity)} · ${d.grade}</li>`).join('')}</ul>` : '<p class="na">No dimension reaches the strong-match threshold.</p>'}</div>
         <div><h4>Weak matches</h4>${compare.weak.length ? `<ul>${compare.weak.map((d) => `<li><b>${esc(d.label)}</b> · ${pct(d.similarity)} · ${d.grade}</li>`).join('')}</ul>` : '<p class="na">No dimension falls below the weak-match threshold.</p>'}</div>
@@ -1547,6 +1747,8 @@ function bind() {
       }
     } else if (action === 'exit-twin') {
       deactivateTwin();
+    } else if (action === 'open-analog') {
+      selectEarthAnalog(btn.dataset.analog);
     } else if (action === 'nearest') {
       selectSite(btn.dataset.site);
       state.globe?.flyTo(BODY_SITES[state.body].find((s) => s.id === btn.dataset.site).lat, BODY_SITES[state.body].find((s) => s.id === btn.dataset.site).lon);
@@ -1589,6 +1791,7 @@ async function switchBody(body) {
   state.selection = null;
   state.twin.active = false;
   state.twin.rankings = [];
+  state.twin.allRankings = [];
   state.twin.compare = null;
   state.twin.selectedAnalogId = null;
   $('#twin-toggle').setAttribute('aria-pressed', 'false');

@@ -84,6 +84,9 @@ export class PlanetGlobe {
       creditContainer: this.creditEl,
       globe: new C.Globe(radius),
       mapProjection: new C.GeographicProjection(radius),
+      targetFrameRate: 30,
+      requestRenderMode: true,
+      maximumRenderTimeChange: Infinity,
       contextOptions: { webgl: { alpha: false, preserveDrawingBuffer: false } },
     });
 
@@ -94,6 +97,23 @@ export class PlanetGlobe {
     scene.globe.enableLighting = false;
     scene.fog.enabled = false;
     scene.screenSpaceCameraController.minimumZoomDistance = 1200;
+    // This globe is imagery plus DOM markers, so multisampling buys little and
+    // costs a large amount of fill rate. Mars gets a looser screen-space error
+    // target because its 232 m global mosaic is the expensive layer while the
+    // markers and DEM overlays stay independent of imagery detail.
+    scene.msaaSamples = 1;
+    scene.postProcessStages.fxaa.enabled = false;
+    scene.globe.maximumScreenSpaceError = this.body === 'mars' ? 4 : 3;
+    scene.globe.tileCacheSize = 96;
+    scene.globe.preloadAncestors = false;
+    scene.requestRenderMode = true;
+    scene.maximumRenderTimeChange = Infinity;
+    scene.screenSpaceCameraController.inertiaSpin = 0.78;
+    scene.screenSpaceCameraController.inertiaTranslate = 0.78;
+    scene.screenSpaceCameraController.inertiaZoom = 0.62;
+    this.container.dataset.renderMode = 'request';
+    this.container.dataset.msaa = '1';
+    this.container.dataset.screenSpaceError = String(scene.globe.maximumScreenSpaceError);
 
     const tilingScheme = new C.GeographicTilingScheme({ ellipsoid: radius });
     const credit = new C.Credit(cfg.credit);
@@ -179,6 +199,7 @@ export class PlanetGlobe {
       });
     }
     this.updateMarkerPositions();
+    this.viewer.scene.requestRender();
   }
 
   updateMarkerPositions() {
@@ -209,6 +230,7 @@ export class PlanetGlobe {
 
   setBaseVisible(visible) {
     if (this.baseLayer) this.baseLayer.show = visible;
+    this.viewer?.scene.requestRender();
   }
 
   /** overlay: {canvas, width, height} or null */
@@ -229,6 +251,7 @@ export class PlanetGlobe {
     });
     this.overlayLayer = this.viewer.imageryLayers.addImageryProvider(provider);
     this.overlayLayer.alpha = 0.72;
+    this.viewer.scene.requestRender();
   }
 
   flyTo(lat, lon, height) {
@@ -237,7 +260,7 @@ export class PlanetGlobe {
     const cfg = IMAGERY[this.body];
     this.viewer.camera.flyTo({
       destination: C.Cartesian3.fromDegrees(lon, lat, height ?? cfg.height, this.ellipsoid),
-      duration: 1.1,
+      duration: cfg === IMAGERY.mars ? 0.85 : 1.05,
     });
   }
 
@@ -247,7 +270,7 @@ export class PlanetGlobe {
     const cfg = IMAGERY[this.body];
     this.viewer.camera.flyTo({
       destination: C.Cartesian3.fromDegrees(0, 0, cfg.overview, this.ellipsoid),
-      duration: 1.1,
+      duration: cfg === IMAGERY.mars ? 0.85 : 1.05,
     });
   }
 

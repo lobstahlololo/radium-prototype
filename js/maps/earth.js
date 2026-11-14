@@ -188,12 +188,13 @@ export class EarthMap {
     for (const marker of this.markers.values()) marker.remove();
     this.markers.clear();
     for (const item of items) {
+      const scoreText = Number.isFinite(item.score) ? `${Math.round(item.score)}/100` : 'unrated';
       const el = document.createElement('button');
       el.className = `earth-pin pin-${PIN_COLORS[item.grade] || 'u'}${item.selected ? ' selected' : ''}`;
       el.type = 'button';
-      el.title = `${item.name} — Earth analog grade ${item.grade || 'unrated'}`;
-      el.setAttribute('aria-label', `${item.name}, analog grade ${item.grade || 'unrated'}`);
-      el.innerHTML = `<span class="pin-dot">${item.grade || '—'}</span><span class="pin-text">${item.name}<em>${item.country || ''}</em></span>`;
+      el.title = `${item.name} — ${item.grade || 'unrated'} · similarity ${scoreText}`;
+      el.setAttribute('aria-label', `${item.name}, grade ${item.grade || 'unrated'}, similarity ${scoreText}`);
+      el.innerHTML = `<span class="pin-dot">${item.grade || '—'}</span><span class="pin-text">${item.name}<em>${item.country || ''} · ${item.grade || '—'} ${scoreText}</em></span>`;
       el.addEventListener('click', (ev) => {
         ev.stopPropagation();
         (onSelect || this.onSelect)?.(item.id);

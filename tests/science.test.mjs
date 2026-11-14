@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { letterGrade, piecewise, GRADE_BANDS, UNRATED } from '../js/science/grade.js';
 import { MISSION_PROFILES, computeSuitability, weightShares, evaluateFactor } from '../js/science/suitability.js';
-import { comparePair, dimensionSimilarity, rankPlanetMatches, earthFactorGrades, SUBSTRATE_AFFINITY, VOLATILE_AFFINITY, SIMILARITY_DIMENSIONS } from '../js/science/similarity.js';
-import { geometricSolarFraction, effectiveSolar, marsPressureKPa } from '../js/science/solar.js';
+import { comparePair, dimensionSimilarity, rankPlanetMatches, earthFactorGrades, discoverNewAnalogs, SUBSTRATE_AFFINITY, VOLATILE_AFFINITY, SIMILARITY_DIMENSIONS } from '../js/science/similarity.js';
+import { geometricSolarFraction, effectiveSolar, marsPressureKPa, meanSurfaceIrradiance } from '../js/science/solar.js';
 import { DemGrid, sampleRamp } from '../js/science/terrain.js';
 import { summarizeClimate, summarizePowerClimate, terrainFromElevations, toaDailyMJ, terrainSamplePoints, brightnessClass } from '../js/data/earth-climate.js';
 import { MOON_SITES } from '../js/data/moon-sites.js';
@@ -57,6 +57,48 @@ test('mission profile weights sum to one for every profile', () => {
     const total = Object.values(p.weights).reduce((a, b) => a + b, 0);
     assert.ok(Math.abs(total - 1) < 1e-9, `${p.id} weights sum to ${total}`);
   }
+});
+
+test('luminosity, thermal cycling and trafficability are rated from documented inputs', () => {
+  const moon = MOON_SITES.find((s) => s.id === 'apollo-11');
+  const mars = MARS_SITES.find((s) => s.id === 'jezero');
+  const moonResult = computeSuitability(moon, TERRAIN, 'lunar_base', {});
+  const marsResult = computeSuitability(mars, TERRAIN, 'mars_robotic', {});
+  const moonLum = moonResult.factors.find((f) => f.id === 'luminosity');
+  const marsLum = marsResult.factors.find((f) => f.id === 'luminosity');
+  assert.ok(moonLum.available && moonLum.raw > 0);
+  assert.ok(marsLum.available && marsLum.raw > 0);
+  assert.ok(moonLum.raw > marsLum.raw, 'the Moon receives more irradiance at its orbit than Mars');
+  assert.equal(meanSurfaceIrradiance(moon).value, moonLum.raw);
+  assert.ok(moonResult.factors.find((f) => f.id === 'thermalCycle').available);
+  const traffic = moonResult.factors.find((f) => f.id === 'trafficability');
+  assert.ok(traffic.available);
+  assert.equal(traffic.evidence, 'assessment');
+  assert.match(traffic.detail, /not measured regolith mechanics/i);
+});
+
+test('similarity dimensions include absolute luminosity and normalise to one', () => {
+  const total = SIMILARITY_DIMENSIONS.reduce((sum, d) => sum + d.weight, 0);
+  assert.ok(Math.abs(total - 1) < 1e-9, `dimension weights sum to ${total}`);
+  const site = MOON_SITES.find((s) => s.id === 'apollo-11');
+  const result = comparePair({ site, terrain: TERRAIN, body: 'moon' }, earthCandidate());
+  const lum = result.dimensions.find((d) => d.id === 'luminosity');
+  assert.ok(lum.available);
+  assert.ok(lum.planetValue > 0 && lum.earthValue > 0);
+  assert.ok(lum.grade);
+});
+
+test('new-analog shortlist excludes established sites and keeps statistical leads', () => {
+  const pool = [
+    { id: 'established', name: 'Established', established: true },
+    { id: 'emerging-a', name: 'Emerging A', established: false },
+    { id: 'emerging-b', name: 'Emerging B', established: false },
+  ];
+  const ranking = (earthId, score) => ({ earthId, earthName: earthId, score, grade: 'B', strong: [{ label: 'Slope', similarity: 0.8 }], weak: [] });
+  const found = discoverNewAnalogs([ranking('established', 90), ranking('emerging-a', 80), ranking('emerging-b', 70)], pool, 3);
+  assert.deepEqual(found.map((f) => f.earthId), ['emerging-a', 'emerging-b']);
+  assert.match(found[0].why, /slope/i);
+  assert.ok(found.every((f) => f.earth && !f.earth.established));
 });
 
 test('missing data is excluded and remaining weights renormalise', () => {

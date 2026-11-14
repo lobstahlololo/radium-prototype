@@ -12,7 +12,7 @@
  */
 
 import { clamp01, letterGrade, round } from './grade.js';
-import { effectiveSolar } from './solar.js';
+import { meanSurfaceIrradiance, SOLAR_IRRADIANCE_WM2 } from './solar.js';
 
 /**
  * Substrate affinity, by broad surface-material group. 1 = same material class
@@ -108,13 +108,13 @@ export const SIMILARITY_DIMENSIONS = [
     note: 'Categorical comparison of how water/ice occurs (none, ground ice, exposed ice, hydrated minerals, ephemeral water, salt hydrate).',
   },
   {
-    id: 'solar',
-    label: 'Relative solar resource',
-    unit: 'fraction',
+    id: 'luminosity',
+    label: 'Luminosity / mean surface irradiance',
+    unit: 'W/m²',
     weight: 0.12,
-    scale: 0.4,
+    scale: 300,
     evidence: 'medium',
-    note: 'Annual mean surface insolation as a fraction of the solar constant, including atmospheric transmission. Polar illumination-time percentages are reported separately and are not compared as energy.',
+    note: 'Absolute annual mean surface irradiance. This captures both orbital flux (Mars receives less sunlight than the Moon) and latitude/atmospheric transmission. Earth uses POWER annual shortwave; planetary values are modelled. Polar illumination-time percentages are reported separately and are not compared as energy.',
   },
 ];
 
@@ -134,7 +134,7 @@ export function planetDimensions(site, terrain) {
     roughness: terrain?.roughnessM ?? null,
     substrate: site?.substrateGroup ?? null,
     volatile: site?.volatileGroup ?? null,
-    solar: site?.solarFraction?.value ?? (site?.body ? effectiveSolar(site).value : null),
+    luminosity: meanSurfaceIrradiance(site)?.value ?? null,
   };
 }
 
@@ -147,7 +147,7 @@ export function earthDimensions(earth) {
     roughness: earth?.terrain?.roughnessM ?? null,
     substrate: earth?.substrateGroup ?? null,
     volatile: earth?.volatileGroup ?? null,
-    solar: earth?.climate?.solarFraction ?? null,
+    luminosity: Number.isFinite(earth?.climate?.solarFraction) ? Number((earth.climate.solarFraction * SOLAR_IRRADIANCE_WM2.earth).toFixed(1)) : null,
   };
 }
 
@@ -281,7 +281,7 @@ export function comparePair(planet, earth) {
       'Similarity is not equivalence: a letter grade describes how closely measured characteristics align, not whether the site reproduces planetary conditions.',
       'Planetary temperature, illumination and volatile values are regional estimates or published models, not measurements at the exact clicked point.',
       'Earth terrain metrics use a ~5 km elevation grid; planetary metrics use ~7.6 km DEM cells. Both are regional-scale comparisons.',
-      ...(earth.climate?.source ? [] : ['Earth climate normals are unavailable for this candidate, so thermal and solar dimensions were dropped from the score.']),
+      ...(earth.climate?.source ? [] : ['Earth climate normals are unavailable for this candidate, so thermal and luminosity dimensions were dropped from the score.']),
     ],
   };
 }
@@ -334,7 +334,7 @@ export const EARTH_FACTOR_GROUPS = [
   {
     id: 'environment',
     label: 'Temperature, illumination & environmental extremes',
-    dimensionIds: ['thermalMean', 'thermalAmp', 'solar'],
+    dimensionIds: ['thermalMean', 'thermalAmp', 'luminosity'],
     note: 'Mean/diurnal thermal proxy and annual solar fraction. Polar illumination time is reported separately.',
   },
   {
@@ -371,6 +371,28 @@ export const EARTH_FACTOR_GROUPS = [
 ];
 
 /** Builds the eight factor rows for an Earth-vs-planet comparison. */
+/**
+ * Extracts the strongest less-studied candidates from a statistical ranking.
+ * "New" here means not already established in the curated analog literature; it
+ * does not mean a newly discovered coordinate or a verified field site.
+ */
+export function discoverNewAnalogs(rankings, earthCandidates, limit = 3) {
+  const pool = new Map((earthCandidates || []).map((candidate) => [candidate.id, candidate]));
+  return (rankings || [])
+    .filter((ranking) => ranking.score !== null)
+    .map((ranking) => ({ ...ranking, earth: pool.get(ranking.earthId) }))
+    .filter((ranking) => ranking.earth && !ranking.earth.established)
+    .slice(0, limit)
+    .map((ranking) => ({
+      ...ranking,
+      strongest: ranking.strong[0] || null,
+      weakest: ranking.weak[0] || null,
+      why: ranking.strong[0]
+        ? `Strongest measured overlap: ${ranking.strong[0].label.toLowerCase()} (${Math.round(ranking.strong[0].similarity * 100)}%).`
+        : 'No dimension clears the strong-match threshold; the rank comes from broad, moderate overlap.',
+    }));
+}
+
 export function earthFactorGrades(compare) {
   return EARTH_FACTOR_GROUPS.map((group) => {
     const dims = group.dimensionIds
