@@ -227,6 +227,10 @@ li { list-style: none; }
 }
 .pill-quiet { color: var(--faint); }
 .pill-warn { color: #fca5a5; border-color: rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.08); }
+.pill-experimental { color: #fde68a; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.09); }
+.status-ok { color: #6ee7b7 !important; }
+.status-warn { color: #fca5a5 !important; }
+.terrain-scales { margin-top: 8px; padding-top: 4px; border-top: 1px solid rgba(148, 163, 184, 0.08); }
 
 /* ----------------------------------------------------------------- workspace */
 

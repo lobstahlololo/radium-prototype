@@ -484,6 +484,9 @@ function updateEarthMarkers() {
     : (state.selection?.kind === 'earth' && state.selection.custom ? state.selection.profile : null);
   const customCompare = state.twin.active ? state.twin.compare : state.earthCompare;
   const targetRanking = state.twin.active ? null : targetRankingsFor();
+  const customKey = customProfile ? earthMatchKey(customProfile) : null;
+  const customBest = customKey ? state.earthMatches[customKey]?.[0] : null;
+  const customRating = customCompare?.earthId === customProfile?.id ? customCompare : customBest;
   let items;
   if (state.twin.active) {
     items = state.twin.rankings
@@ -526,8 +529,8 @@ function updateEarthMarkers() {
       country: 'user-selected coordinate',
       lat: customProfile.lat,
       lon: customProfile.lon,
-      grade: customCompare?.earthId === customProfile.id ? customCompare.grade : UNRATED,
-      score: customCompare?.earthId === customProfile.id ? customCompare.score : null,
+      grade: customRating?.grade ?? UNRATED,
+      score: customRating?.score ?? null,
       selected: true,
       established: false,
     });
@@ -617,7 +620,7 @@ async function onEarthPick({ lat, lon }) {
       volatileGroup: null,
       established: false,
       landform: 'User-selected coordinate',
-    });
+    }, { detailed: true, includeContext: true });
     applyCustomEarthProfile(profile);
   } catch (err) {
     state.selection = { kind: 'earth-error', name: 'Clicked Earth point', message: err.message };
@@ -1402,7 +1405,7 @@ function renderEarthIntro() {
     <div class="inspector-head">
       <p class="eyebrow">Earth · terrestrial analogs</p>
       <h2>What does each Earth site resemble?</h2>
-      <p class="lede">RADIUM rates all ${EARTH_ANALOGS.length} curated Earth candidates against every Moon and Mars site. Each gets an overall analog grade, the closest planetary match, and an eight-factor profile.</p>
+      <p class="lede">RADIUM rates all ${EARTH_ANALOGS.length} curated Earth candidates against every Moon and Mars site. Every map click also gets an experimental score from live climate, multi-scale terrain, soil and volcanic-context data.</p>
     </div>
     ${target ? `<div class="alert alert-info"><strong>Comparison target armed: ${esc(target.site.name)} (${esc(BODIES[target.body].label)}).</strong><p>Click any Earth pin — or anywhere on the map — to compare that exact location with the target on every available comparable factor.</p></div>` : `<div class="alert alert-info"><strong>Pick a comparison target first.</strong><p>Select a Moon or Mars site, then return here and click any Earth pin or map point for a direct head-to-head.</p></div>`}
     <div class="steps">
@@ -1470,6 +1473,68 @@ function renderBrightnessFactors(c) {
   </section>`;
 }
 
+function statusRow(label, status) {
+  if (!status) return '';
+  return `<div><dt>${esc(label)}</dt><dd class="${status.ok ? 'status-ok' : 'status-warn'}">${status.ok ? 'Available' : 'Unavailable'}</dd><p>${esc(status.ok ? [status.source, status.detail].filter(Boolean).join(' · ') : status.error)}</p></div>`;
+}
+
+function renderPointDataStatus(profile) {
+  if (!profile.experimental || !profile.dataStatus) return '';
+  const s = profile.dataStatus;
+  return `<section class="panel-section">
+    <div class="section-head"><h3>Point data coverage</h3><span class="fine">experimental</span></div>
+    <dl class="metric-list">
+      ${statusRow('Climate normals', s.climate)}
+      ${statusRow('Elevation / terrain', s.terrain)}
+      ${statusRow('SoilGrids regolith proxy', s.soil)}
+      ${statusRow('Smithsonian volcano context', s.volcano)}
+    </dl>
+    <p class="fine">The score uses only comparable dimensions that returned data. Soil texture and volcano proximity are informational context and are not folded into the numeric score.</p>
+  </section>`;
+}
+
+function renderTerrainScaleRows(profile) {
+  const rows = [
+    ['Fine · 1 km grid', profile.terrainFine],
+    ['Regional · 10 km grid', profile.terrain],
+    ['Broad · 50 km grid', profile.terrainBroad],
+  ].filter(([, terrain]) => terrain);
+  if (rows.length < 2) return '';
+  return `<dl class="metric-list terrain-scales">${rows.map(([label, terrain]) => `<div><dt>${label}</dt><dd>${terrain.slopeDeg}° · ${terrain.roughnessM} m σ</dd><p>Elevation ${terrain.elevationM} m · ${terrain.windowKm} km window</p></div>`).join('')}</dl>`;
+}
+
+function renderSoilContext(profile) {
+  const s = profile.soil;
+  if (!s) return '';
+  const value = (n, suffix = '') => Number.isFinite(n) ? `${n}${suffix}` : 'Data unavailable.';
+  return `<section class="panel-section">
+    <div class="section-head"><h3>Regolith &amp; soil proxy</h3><span class="fine">SoilGrids 2.0 · ${esc(s.depth)}</span></div>
+    <dl class="metric-grid">
+      <div><dt>Texture class</dt><dd>${s.textureClass ? esc(s.textureClass) : 'Data unavailable.'}</dd><span>USDA-style class</span></div>
+      <div><dt>Sand</dt><dd>${value(s.sandPct, '%')}</dd><span>Fine-earth fraction</span></div>
+      <div><dt>Clay</dt><dd>${value(s.clayPct, '%')}</dd><span>Fine-earth fraction</span></div>
+      <div><dt>Silt</dt><dd>${value(s.siltPct, '%')}</dd><span>Fine-earth fraction</span></div>
+      <div><dt>Coarse fragments</dt><dd>${value(s.coarsePct, '%')}</dd><span>Volume fraction</span></div>
+      <div><dt>Bulk density</dt><dd>${value(s.bulkDensity, ' kg/dm³')}</dd><span>Topsoil mean</span></div>
+      <div><dt>Soil pH</dt><dd>${value(s.ph)}</dd><span>0–30 cm mean</span></div>
+      <div><dt>Resolution</dt><dd>${esc(s.resolution)}</dd><span>Global soil grid</span></div>
+    </dl>
+    <p class="fine">${esc(s.note)}</p>
+  </section>`;
+}
+
+function renderVolcanoContext(profile) {
+  const v = profile.volcano;
+  if (!v) return '';
+  return `<section class="panel-section">
+    <div class="section-head"><h3>Volcanic context</h3><span class="fine">Smithsonian GVP</span></div>
+    <p><strong>${esc(v.name)}</strong> · ${Math.round(v.distanceKm)} km away · ${esc(v.type || 'volcanic center')}</p>
+    <p class="fine">${esc(v.country || '')}${v.region ? ` · ${esc(v.region)}` : ''} · Last eruption: ${esc(v.eruption)}</p>
+    <p class="fine">${esc(v.note)}</p>
+    ${v.url || v.u ? `<a class="text-link" href="${esc(v.url || v.u)}" target="_blank" rel="noopener">Open GVP volcano record ↗</a>` : ''}
+  </section>`;
+}
+
 function renderEarthInspector() {
   const profile = state.selection.profile;
   const c = profile.climate;
@@ -1482,6 +1547,13 @@ function renderEarthInspector() {
   const explicit = state.earthCompare?.earthId === profile.id ? state.earthCompare : null;
   const hero = explicit || best;
   const target = explicit ? { site: explicit.planetSite, body: explicit.planetBody } : null;
+  const experimental = Boolean(profile.experimental || profile.id === 'custom-earth-point');
+  const availableDims = hero?.dimensions?.filter((d) => d.available).length ?? 0;
+  const totalDims = hero?.dimensions?.length ?? 7;
+  const heroLabel = experimental
+    ? explicit ? 'Experimental head-to-head score' : 'Experimental analog score'
+    : explicit ? 'Head-to-head analog grade' : 'Overall analog grade';
+  const earthSources = ['nasa_power', 'era5', 'copernicus_dem', ...(experimental ? ['open_elevation', 'aws_terrain_tiles', 'soilgrids', 'gvp'] : []), 'gibs_blue_marble'];
   return `
     <div class="inspector-head">
       <p class="eyebrow">Earth · ${esc(profile.country || 'custom coordinate')}</p>
@@ -1490,12 +1562,13 @@ function renderEarthInspector() {
     </div>
     ${contextFigure()}
     ${profile.dataIssue ? `<div class="alert alert-warn"><strong>Partial data.</strong> ${esc(profile.dataIssue)}</div>` : ''}
+    ${renderPointDataStatus(profile)}
     ${hero ? `<div class="grade-hero grade-${hero.grade}">
       <div class="grade-orb">${hero.grade}</div>
-      <div class="grade-copy"><p class="grade-label">${explicit ? 'Head-to-head analog grade' : 'Overall analog grade'}</p>
-      <p class="grade-sub">${explicit ? `Compared with <strong>${esc(explicit.planetSite.name)}</strong> · ${esc(BODIES[explicit.planetBody]?.label || explicit.planetBody)}` : `Mimics <strong>${esc(best.planetSite.name)}</strong> · ${esc(BODIES[best.planetBody]?.label || best.planetBody)}`}</p>
-      <div class="chip-row"><span class="pill">Score ${Math.round(hero.score)}/100</span><span class="pill">Coverage ${pct(hero.coverage)}</span><span class="pill">Confidence ${confidenceLabel(hero.confidence)}</span></div></div>
-    </div>${explicit ? `<p class="fine">This is your selected comparison, not the closest overall match. The closest curated planetary match remains listed below for context.</p>` : ''}` : pending ? `<div class="alert alert-info"><strong>Rating this Earth site…</strong> Loading both planetary DEMs and comparing against every curated Moon and Mars site. The live measurements below are already available.</div>` : matchError ? `<div class="alert alert-warn"><strong>Planetary match unavailable.</strong> ${esc(matchError)}</div>` : `<div class="alert alert-info"><strong>No comparable planetary match.</strong> The available measurements do not overlap enough with a curated planetary site to issue a grade.</div>`}
+      <div class="grade-copy"><p class="grade-label">${heroLabel}</p>
+      <p class="grade-sub">${explicit ? `Compared with <strong>${esc(explicit.planetSite.name)}</strong> · ${esc(BODIES[explicit.planetBody]?.label || explicit.planetBody)}` : `Mimics <strong>${esc(best.planetSite.name)}</strong> · ${esc(BODIES[best.planetBody]?.label || best.planetBody)}`}${experimental ? ' · clicked coordinate' : ''}</p>
+      <div class="chip-row"><span class="pill">Score ${Math.round(hero.score)}/100</span><span class="pill">Coverage ${pct(hero.coverage)}</span><span class="pill">Confidence ${confidenceLabel(hero.confidence)}</span>${experimental ? '<span class="pill pill-experimental">Experimental</span>' : ''}</div></div>
+    </div>${explicit ? `<p class="fine">This is your selected comparison, not the closest overall match. The closest curated planetary match remains listed below for context.</p>` : ''}${experimental ? `<div class="alert alert-info"><strong>Experimental score.</strong> Computed from ${availableDims}/${totalDims} comparable dimensions (${pct(hero.coverage)} coverage). Soil texture and volcano proximity are shown below but are not added to the score. Missing dimensions are never inferred.</div>` : ''}` : pending ? `<div class="alert alert-info"><strong>Rating this Earth site…</strong> Loading both planetary DEMs and comparing against every curated Moon and Mars site. The live measurements below are already available.</div>` : matchError ? `<div class="alert alert-warn"><strong>Planetary match unavailable.</strong> ${esc(matchError)}</div>` : `<div class="alert alert-info"><strong>No comparable planetary match.</strong> The available measurements do not overlap enough with a curated planetary site to issue a grade.</div>`}
     ${target ? `<p class="fine compare-target"><strong>Comparison target:</strong> ${esc(target.site.name)} · ${esc(BODIES[target.body].label)}. The bars below compare this Earth site directly with that selection.</p>` : ''}
     ${renderSpaceComparison(matches, profile)}
     ${c ? `<dl class="metric-list">
@@ -1514,13 +1587,17 @@ function renderEarthInspector() {
         <div><dt>Slope</dt><dd>${t.slopeDeg} <small>°</small></dd><span>Horn 3×3</span></div>
         <div><dt>Roughness</dt><dd>${t.roughnessM} <small>m σ</small></dd><span>${t.windowKm} km window</span></div>
         <div><dt>Sampling</dt><dd>${t.resolutionKm} <small>km</small></dd><span>9-point grid</span></div>
-      </dl></section>` : '<p class="na">Elevation grid unavailable for this point.</p>'}
+      </dl>
+      ${renderTerrainScaleRows(profile)}
+    </section>` : '<p class="na">Elevation grid unavailable for this point.</p>'}
+    ${renderSoilContext(profile)}
+    ${renderVolcanoContext(profile)}
     ${explicit ? renderComparisonBlock(explicit) : ''}
     ${renderMimicBlock(matches)}
     ${hero ? renderEarthFactorSection(hero) : ''}
     ${profile.geologyBasis ? `<section class="panel-section"><div class="section-head"><h3>Geology</h3></div><p>${esc(profile.geologyBasis)}</p><p class="fine"><strong>Analog status.</strong> ${profile.established ? 'Established planetary analog in published research.' : 'Less-studied candidate: this match is data-driven, not an established field analog.'}</p>${profile.protection ? `<p class="fine"><strong>Access.</strong> ${esc(profile.protection)}</p>` : ''}</section>` : ''}
     <section class="panel-section"><div class="section-head"><h3>Sources</h3></div>
-      <ul class="source-list">${sourceLinks(['nasa_power', 'era5', 'copernicus_dem', 'gibs_blue_marble'])}</ul>
+      <ul class="source-list">${sourceLinks(earthSources)}</ul>
       ${c ? `<p class="fine">${esc(c.source)} · ${esc(c.period)}</p>` : ''}</section>`;
 }
 

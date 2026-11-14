@@ -6,7 +6,8 @@ import { MISSION_PROFILES, computeSuitability, weightShares, evaluateFactor } fr
 import { comparePair, dimensionSimilarity, rankPlanetMatches, earthFactorGrades, discoverNewAnalogs, SUBSTRATE_AFFINITY, VOLATILE_AFFINITY, SIMILARITY_DIMENSIONS } from '../js/science/similarity.js';
 import { geometricSolarFraction, effectiveSolar, marsPressureKPa, meanSurfaceIrradiance } from '../js/science/solar.js';
 import { DemGrid, sampleRamp } from '../js/science/terrain.js';
-import { summarizeClimate, summarizePowerClimate, terrainFromElevations, toaDailyMJ, terrainSamplePoints, brightnessClass } from '../js/data/earth-climate.js';
+import { summarizeClimate, summarizePowerClimate, terrainFromElevations, toaDailyMJ, terrainSamplePoints, brightnessClass, summarizeSoil, classifySoilTexture } from '../js/data/earth-climate.js';
+import { nearestVolcano } from '../js/data/earth-context.js';
 import { MOON_SITES } from '../js/data/moon-sites.js';
 import { MARS_SITES } from '../js/data/mars-sites.js';
 
@@ -330,6 +331,9 @@ test('NASA POWER climatology summariser uses monthly normals without inventing v
   assert.ok(c.et0Mm > 500 && c.et0Mm < 4000);
   assert.ok(c.aridityIndex > 0);
   assert.equal(c.albedo, 0.17);
+  assert.equal(c.soilWetnessTop, null);
+  assert.equal(c.soilWetnessRoot, null);
+  assert.equal(c.aod550, null);
   assert.equal(brightnessClass(c.albedo).id, 'dark');
   assert.equal(brightnessClass(null), null);
   assert.equal(brightnessClass(0.65).id, 'very-bright');
@@ -339,6 +343,83 @@ test('NASA POWER climatology summariser uses monthly normals without inventing v
   const c2 = summarizePowerClimate({ properties: { parameter: missing } }, 0);
   assert.equal(c2.diurnalAmpK, null);
   assert.equal(summarizePowerClimate({}, 0), null);
+});
+
+test('POWER soil wetness and aerosol context are parsed without inventing values', () => {
+  const p = {
+    T2M: { ANN: 20 },
+    T2M_MAX: { ANN: 30 },
+    T2M_MIN: { ANN: 15 },
+    PRECTOTCORR: { ANN: 0.5 },
+    ALLSKY_SFC_SW_DWN: { ANN: 6 },
+    ALLSKY_SRF_ALB: { ANN: 0.17 },
+    GWETTOP: { ANN: 0.11 },
+    GWETROOT: { ANN: 0.34 },
+    AOD_55: { ANN: 0.08 },
+  };
+  const c = summarizePowerClimate({ properties: { parameter: p } }, 0);
+  assert.equal(c.soilWetnessTop, 0.11);
+  assert.equal(c.soilWetnessRoot, 0.34);
+  assert.equal(c.aod550, 0.08);
+  const missing = summarizePowerClimate({ properties: { parameter: { ...p, GWETTOP: { ANN: -999 }, AOD_55: { ANN: -999 } } } }, 0);
+  assert.equal(missing.soilWetnessTop, null);
+  assert.equal(missing.aod550, null);
+});
+
+test('SoilGrids summariser converts texture units and labels context, not bedrock geology', () => {
+  const layer = (name, values, factor = 10) => ({ name, unit_measure: { d_factor: factor }, depths: values.map((mean) => ({ values: { mean } })) });
+  const soil = summarizeSoil({
+    properties: {
+      layers: [
+        layer('clay', [140, 150, 160]),
+        layer('sand', [610, 600, 590]),
+        layer('silt', [250, 250, 250]),
+        layer('cfvo', [180, 200, 220]),
+        layer('bdod', [125, 130, 135], 100),
+        layer('phh2o', [72, 73, 74]),
+      ],
+    },
+  });
+  assert.equal(soil.clayPct, 15);
+  assert.equal(soil.sandPct, 60);
+  assert.equal(soil.siltPct, 25);
+  assert.equal(soil.coarsePct, 20);
+  assert.equal(soil.bulkDensity, 1.3);
+  assert.equal(soil.ph, 7.3);
+  assert.equal(soil.textureClass, 'sandy loam');
+  assert.match(soil.note, /context only/i);
+  assert.equal(summarizeSoil({}), null);
+  assert.equal(classifySoilTexture(80, 5, 15), 'sand');
+  assert.equal(classifySoilTexture(20, 45, 35), 'clay');
+  assert.equal(classifySoilTexture(10, 10, 80), 'silt');
+});
+
+test('nearest Holocene volcano is a distance context, not a lava-tube claim', () => {
+  const catalog = {
+    source: 'test GVP snapshot',
+    volcanoes: [
+      { n: 'Near center', c: 'Test', r: 'Test region', t: 'Volcanic field', y: 2020, lat: 0, lon: 0, u: 'https://example.test/near' },
+      { n: 'Far center', c: 'Test', r: 'Test region', t: 'Stratovolcano', y: -8300, lat: 10, lon: 0, u: 'https://example.test/far' },
+    ],
+  };
+  const near = nearestVolcano(0.1, 0, catalog);
+  assert.equal(near.n, 'Near center');
+  assert.ok(near.distanceKm > 10 && near.distanceKm < 12);
+  assert.equal(near.eruption, '2020 CE');
+  assert.match(near.note, /not evidence of local lava tubes/i);
+  assert.equal(nearestVolcano(0, 0, { volcanoes: [] }), null);
+});
+
+test('experimental partial point scores remain numeric and disclose missing dimensions', () => {
+  const site = MOON_SITES.find((s) => s.id === 'apollo-11');
+  const partial = earthCandidate({ climate: null, substrateGroup: null, volatileGroup: null, experimental: true });
+  const result = comparePair({ site, terrain: TERRAIN, body: 'moon' }, partial);
+  assert.equal(result.experimental, true);
+  assert.ok(result.score !== null);
+  assert.ok(result.coverage < 0.5);
+  assert.ok(result.dimensions.find((d) => d.id === 'slope').available);
+  assert.ok(result.dimensions.find((d) => d.id === 'luminosity').available === false);
+  assert.ok(result.caveats.some((c) => /experimental clicked-point score/i.test(c)));
 });
 
 test('Earth terrain metrics from nine samples are scale-aware', () => {

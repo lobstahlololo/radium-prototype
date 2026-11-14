@@ -49,6 +49,7 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | Top-five-only Earth-analog matrix in Twin Mode, plus top-five Moon/Mars comparison for any Earth site | Working |
 | Earth Twin Mode: live NASA POWER/DEM measurements, top-five terrestrial analogs, dimension grades | Working |
 | Earth dossier: overall best-planet match, eight-factor analog profile, brightness/albedo factors, explicit data gaps | Working |
+| Experimental score for any clicked Earth coordinate from live climate, multi-scale terrain, SoilGrids and Smithsonian volcano context | Working |
 | Side-by-side comparison, strong/weak matches, applications, physical mismatches | Working |
 | Dataset registry with provenance, resolution, licensing and limitations | Working |
 | Context imagery at the selected coordinate | Working (NASA tiles drawn client-side) |
@@ -58,7 +59,7 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 - Global per-pixel planetary temperature or ice rasters (RADIUM uses labelled regional values/published models instead).
 - Certified landing-hazard analysis at metre scale. The 0.25° DEM cannot resolve it, and the UI says so.
 - Gravity, atmosphere, radiation or magnetic-field simulation. These are listed as **not comparable**, never scored.
-- Autonomous global discovery of arbitrary new analog sites. The candidate pool is curated and extensible; arbitrary Earth points can still be measured and compared.
+- Autonomous global discovery of arbitrary new analog sites. The candidate pool is curated and extensible; arbitrary Earth points receive an experimental score from live climate and terrain, but that is not the same as a validated field analog.
 - A multi-user database backend. The data layer is static + live public APIs.
 
 ---
@@ -136,7 +137,10 @@ docs/                      Methodology and data-source documentation
 | Earth temperature overlay | MODIS Terra LST 8-day day | Live WMTS, NASA GIBS |
 | Earth aerosol overlay | MERRA-2 monthly AOD at 550 nm | Live WMTS, NASA GIBS |
 | Earth climate | NASA POWER 25-year climatology (2001–2025) | Live POWER API; ERA5 fallback |
-| Earth terrain | Copernicus DEM GLO-90 | Live Open-Meteo elevation API |
+| Earth terrain | Copernicus DEM GLO-90 | Live Open-Meteo elevation API; Open-Elevation/SRTM and AWS Terrarium fallbacks |
+| Earth topsoil context | SoilGrids 2.0 | Live ISRIC API; context only, not scored |
+| Earth volcanic context | Smithsonian GVP Holocene volcanoes | Bundled trimmed snapshot; nearest-center context only |
+| High-resolution reference | TerraClimate, GLDAS, ASTER GED, ALOS AW3D30, Planetary Computer | Catalogue/provenance records; not point-queried in this build |
 | Planetary temperature/illumination/ice | Diviner, LAMP/Mini-RF, LCROSS, CRISM, Odyssey, SHARAD, TES | Cited regional values, never fabricated point data |
 
 Live services can be unavailable. RADIUM degrades explicitly: imagery errors appear on the map, Earth climate failures produce "Data unavailable" and drop similarity dimensions, and the app never substitutes placeholder science.

@@ -283,6 +283,8 @@ The Moon/Mars analog interface reports and compares only the **top five** Earth 
 
 In the normal Earth view the comparison direction is reversed: the selected Earth location is scored against all 31 curated Moon/Mars sites, and the five closest space sites are shown. Each dimension cell carries its own 0–100 match grade, and comparison bars are grouped into thermally, terrain, surface and energy sections with a section grade where data exist. No Earth-to-Earth analog ranking is used in that view. Missing terrain or climate data is shown as “Not assessed” rather than inferred.
 
+Any clicked Earth coordinate receives an **experimental score** even when it is not a curated analog. The point profile fetches NASA POWER/ERA5 climate, Copernicus DEM terrain at 1 km, 10 km and 50 km sampling scales, SoilGrids 0–30 cm topsoil, and the nearest Smithsonian Holocene volcano. The score uses only the seven comparable similarity dimensions. Soil texture and volcano proximity are context and are not added to the numeric score. If Open-Meteo elevation is unavailable, Open-Elevation/SRTM is used and labelled; if both point services are throttled, AWS Terrarium tiles provide the same sample grid and are labelled. The dossier reports which sources succeeded, how many dimensions were available, coverage and confidence; no missing dimension is inferred.
+
 ### 4.8 Brightness factors
 
 Surface brightness is represented by **broadband surface albedo**, the fraction of incident shortwave radiation reflected by the surface. It is distinct from brightness temperature and from the visual brightness of an image.
@@ -316,7 +318,7 @@ The overlays are display-only and are never used as inputs to the analog score. 
 | Moon | LRO LOLA LDEM 4 ppd | 1440×720, 0.25° | 1737.4 km sphere; height = DN × 0.5 m | Interpolated where tracks are sparse |
 | Mars | MGS MOLA MEGDR 4 ppd | 1440×720, 0.25° | IAU 2000 areoid; metres | ~55% of equatorial bins contain a shot; gaps interpolated |
 
-Elevation at a coordinate is bilinear. Site metrics are computed on a **fixed 10 km physical sampling grid** (3×3 samples, ~20 km window), not on adjacent grid cells. This avoids the artificial slope inflation that longitude convergence produces near the poles, where 0.25° columns are only tens of metres apart, and it matches the Earth sampling scale. Slope is Horn’s derivative on that grid; roughness is the population standard deviation of the nine samples.
+Elevation at a coordinate is bilinear. Site metrics are computed on a **fixed 10 km physical sampling grid** (3×3 samples, ~20 km window), not on adjacent grid cells. This avoids the artificial slope inflation that longitude convergence produces near the poles, where 0.25° columns are only tens of metres apart, and it matches the Earth sampling scale. Slope is Horn’s derivative on that grid; roughness is the population standard deviation of the nine samples. Clicked Earth points additionally report 1 km and 50 km grids for scale context; the 10 km grid remains the scored comparison because the planetary DEMs are regional.
 
 The global elevation/slope/roughness display layers are generated separately from native cells (Horn on 0.25° cells; σ over 3×3 native cells), and their legends say so. At 0.25°/px, all of these metrics describe regional terrain, **not** landing hazards, outcrops or rover-scale roughness.
 

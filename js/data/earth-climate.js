@@ -12,9 +12,12 @@
  */
 
 import { geometricSolarFraction } from '../science/solar.js';
+import { fetchVolcanoContext } from './earth-context.js';
 
 const CLIMATE_CACHE_KEY = 'radium.earth.climate.v3';
+const SOIL_CACHE_KEY = 'radium.earth.soil.v1';
 const POWER_URL = 'https://power.larc.nasa.gov/api/temporal/climatology/point';
+const SOIL_URL = 'https://rest.isric.org/soilgrids/v2.0/properties/query';
 const POWER_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const CLIMATE_YEARS = [2023, 2024]; // ERA5 fallback window
@@ -108,6 +111,9 @@ export function summarizeClimate(json, lat) {
     aridityIndex: precipMm !== null && et0Mm !== null ? Number((precipMm / Math.max(1, et0Mm)).toFixed(3)) : null,
     solarFraction: solarFraction === null ? null : Number(solarFraction.toFixed(3)),
     albedo: null,
+    soilWetnessTop: null,
+    soilWetnessRoot: null,
+    aod550: null,
     period: `${START_DATE} → ${END_DATE}`,
     years: CLIMATE_YEARS.slice(),
     source: 'ERA5 reanalysis via Open-Meteo archive API (fallback)',
@@ -161,6 +167,9 @@ export function summarizePowerClimate(json, lat) {
   const swKwh = get('ALLSKY_SFC_SW_DWN', 'ANN');
   const solarFraction = swKwh === null ? null : Math.max(0, Math.min(1, (swKwh * 3.6) / SOLAR_CONSTANT_DAILY_MJ));
   const albedo = get('ALLSKY_SRF_ALB', 'ANN');
+  const soilTop = get('GWETTOP', 'ANN');
+  const soilRoot = get('GWETROOT', 'ANN');
+  const aod550 = get('AOD_55', 'ANN');
 
   return {
     tempMeanK: Number((meanC + 273.15).toFixed(1)),
@@ -171,6 +180,9 @@ export function summarizePowerClimate(json, lat) {
     aridityIndex: precipMm !== null && et0Mm ? Number((precipMm / Math.max(1, et0Mm)).toFixed(3)) : null,
     solarFraction: solarFraction === null ? null : Number(solarFraction.toFixed(3)),
     albedo: albedo === null ? null : Number(albedo.toFixed(3)),
+    soilWetnessTop: soilTop === null ? null : Number(soilTop.toFixed(3)),
+    soilWetnessRoot: soilRoot === null ? null : Number(soilRoot.toFixed(3)),
+    aod550: aod550 === null ? null : Number(aod550.toFixed(3)),
     period: json?.header?.range || 'NASA POWER 25-year climatology (Jan 2001 – Dec 2025)',
     years: null,
     source: 'NASA POWER 25-year climatology (MERRA-2/POWER)',
@@ -183,7 +195,7 @@ export function summarizePowerClimate(json, lat) {
 
 async function fetchPowerClimate(lat, lon) {
   const params = new URLSearchParams({
-    parameters: 'T2M,T2M_MAX,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN,ALLSKY_SRF_ALB',
+    parameters: 'T2M,T2M_MAX,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN,ALLSKY_SRF_ALB,GWETTOP,GWETROOT,AOD_55',
     community: 'RE',
     longitude: String(lon),
     latitude: String(lat),
@@ -241,8 +253,92 @@ export async function fetchClimate(lat, lon) {
   return summary;
 }
 
-/** Batched elevation lookup (up to 100 points per request). */
-export async function fetchElevations(points) {
+function readSoilCache() {
+  try {
+    const raw = localStorage.getItem(SOIL_CACHE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSoilCache(cache) {
+  try {
+    localStorage.setItem(SOIL_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    /* storage can be full or disabled; caching is optional */
+  }
+}
+
+/** USDA-style texture class from SoilGrids sand/clay/silt percentages. */
+export function classifySoilTexture(sandPct, clayPct, siltPct) {
+  if (![sandPct, clayPct, siltPct].some(Number.isFinite)) return null;
+  const sand = Number.isFinite(sandPct) ? sandPct : 0;
+  const clay = Number.isFinite(clayPct) ? clayPct : 0;
+  const silt = Number.isFinite(siltPct) ? siltPct : 0;
+  if (clay >= 40) return 'clay';
+  if (sand >= 70) return 'sand';
+  if (silt >= 60) return 'silt';
+  if (clay >= 27) return 'clay loam';
+  if (sand >= 50) return 'sandy loam';
+  return 'loam';
+}
+
+/** Summarises SoilGrids 0–30 cm means. This is a topsoil proxy, not bedrock geology. */
+export function summarizeSoil(json) {
+  const layers = json?.properties?.layers;
+  if (!Array.isArray(layers) || !layers.length) return null;
+  const layerMean = (name) => {
+    const layer = layers.find((entry) => entry.name === name);
+    const values = (layer?.depths || []).map((depth) => depth?.values?.mean).filter(Number.isFinite);
+    if (!values.length) return null;
+    const factor = Number(layer?.unit_measure?.d_factor) || 1;
+    return Number((mean(values) / factor).toFixed(1));
+  };
+  const sandPct = layerMean('sand');
+  const clayPct = layerMean('clay');
+  const siltPct = layerMean('silt');
+  const coarsePct = layerMean('cfvo');
+  const bulkDensity = layerMean('bdod');
+  const ph = layerMean('phh2o');
+  if (![sandPct, clayPct, siltPct, coarsePct, bulkDensity, ph].some(Number.isFinite)) return null;
+  return {
+    sandPct,
+    clayPct,
+    siltPct,
+    coarsePct,
+    bulkDensity,
+    ph,
+    textureClass: classifySoilTexture(sandPct, clayPct, siltPct),
+    depth: '0–30 cm mean',
+    resolution: '250 m',
+    source: 'SoilGrids 2.0 (ISRIC World Soil Information)',
+    note: 'Topsoil texture and coarse-fragment content are a regolith-surface proxy. They are context only and are not substituted for bedrock mineralogy or a curated geological substrate.',
+  };
+}
+
+/** Fetches the SoilGrids 0–30 cm topsoil profile for a point. */
+export async function fetchSoil(lat, lon) {
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  const cache = readSoilCache();
+  const hit = cache[key];
+  if (hit && Date.now() - hit.t < TTL_MS) return hit.v;
+  const params = new URLSearchParams({ lon: String(lon), lat: String(lat) });
+  for (const property of ['clay', 'sand', 'silt', 'cfvo', 'bdod', 'phh2o']) params.append('property', property);
+  for (const depth of ['0-5cm', '5-15cm', '15-30cm']) params.append('depth', depth);
+  params.set('value', 'mean');
+  const res = await fetch(`${SOIL_URL}?${params}`);
+  if (!res.ok) throw new Error(`SoilGrids returned ${res.status}.`);
+  const json = await res.json();
+  const summary = summarizeSoil(json);
+  if (!summary) throw new Error('SoilGrids returned no usable topsoil values.');
+  cache[key] = { t: Date.now(), v: summary };
+  writeSoilCache(cache);
+  return summary;
+}
+
+async function fetchOpenMeteoElevations(points) {
   const out = [];
   for (let i = 0; i < points.length; i += 100) {
     const chunk = points.slice(i, i + 100);
@@ -251,12 +347,137 @@ export async function fetchElevations(points) {
       longitude: chunk.map((p) => p.lon.toFixed(4)).join(','),
     });
     const res = await fetch(`https://api.open-meteo.com/v1/elevation?${params}`);
-    if (!res.ok) throw new Error(`Elevation service returned ${res.status}.`);
+    if (!res.ok) throw new Error(`Open-Meteo elevation returned ${res.status}.`);
     const json = await res.json();
-    if (!Array.isArray(json.elevation)) throw new Error('Elevation response malformed.');
+    if (!Array.isArray(json.elevation) || json.elevation.length !== chunk.length) {
+      throw new Error('Open-Meteo elevation response malformed.');
+    }
     out.push(...json.elevation);
   }
   return out;
+}
+
+async function fetchOpenElevationFallback(points) {
+  const locations = points.map((p) => `${p.lat.toFixed(4)},${p.lon.toFixed(4)}`).join('|');
+  const res = await fetch(`https://api.open-elevation.com/api/v1/lookup?locations=${encodeURIComponent(locations)}`);
+  if (!res.ok) throw new Error(`Open-Elevation returned ${res.status}.`);
+  const json = await res.json();
+  const values = Array.isArray(json?.results) ? json.results.map((result) => result.elevation) : [];
+  if (values.length !== points.length || values.some((value) => !Number.isFinite(value))) {
+    throw new Error('Open-Elevation response malformed.');
+  }
+  return values;
+}
+
+async function openElevationWithRetry(points) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fetchOpenElevationFallback(points);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+  }
+  throw lastError || new Error('Open-Elevation failed.');
+}
+
+/** Terrarium tiles are an independent global DEM fallback; z10 is ≈150 m near the equator. */
+const TERRARIUM_CACHE = new Map();
+
+function terrariumTileFor(lat, lon, zoom = 10) {
+  const n = 2 ** zoom;
+  const latRad = (Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI) / 180;
+  const xFloat = ((lon + 180) / 360) * n;
+  const yFloat = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+  const x = Math.floor(xFloat);
+  const y = Math.floor(yFloat);
+  return {
+    x,
+    y,
+    px: Math.min(255, Math.max(0, Math.floor((xFloat - x) * 256))),
+    py: Math.min(255, Math.max(0, Math.floor((yFloat - y) * 256))),
+  };
+}
+
+function loadTerrariumTile(x, y) {
+  const key = `${x}/${y}`;
+  if (TERRARIUM_CACHE.has(key)) return TERRARIUM_CACHE.get(key);
+  const promise = new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, 256, 256).data;
+        const elevations = new Float32Array(256 * 256);
+        for (let i = 0; i < 256 * 256; i += 1) {
+          const offset = i * 4;
+          elevations[i] = pixels[offset] * 256 + pixels[offset + 1] + pixels[offset + 2] / 256 - 32768;
+        }
+        resolve(elevations);
+      } catch (error) {
+        reject(new Error(`Terrarium tile could not be decoded: ${error.message}`));
+      }
+    };
+    image.onerror = () => reject(new Error('Terrarium tile failed to load.'));
+    image.src = `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/10/${x}/${y}.png`;
+  });
+  TERRARIUM_CACHE.set(key, promise);
+  promise.catch(() => TERRARIUM_CACHE.delete(key));
+  return promise;
+}
+
+async function fetchTerrariumElevations(points) {
+  const tilePromises = new Map();
+  for (const point of points) {
+    const tile = terrariumTileFor(point.lat, point.lon);
+    const key = `${tile.x}/${tile.y}`;
+    if (!tilePromises.has(key)) tilePromises.set(key, loadTerrariumTile(tile.x, tile.y));
+  }
+  const tiles = await Promise.all(tilePromises.values());
+  const values = new Map([...tilePromises.keys()].map((key, index) => [key, tiles[index]]));
+  return points.map((point) => {
+    const tile = terrariumTileFor(point.lat, point.lon);
+    const pixels = values.get(`${tile.x}/${tile.y}`);
+    return pixels ? pixels[tile.py * 256 + tile.px] : NaN;
+  });
+}
+
+/** Batched elevation lookup with independent SRTM and Terrarium fallbacks. */
+export async function fetchElevations(points) {
+  let primaryError = null;
+  let openElevationError = null;
+  try {
+    return { values: await fetchOpenMeteoElevations(points), source: 'Open-Meteo elevation / Copernicus DEM GLO-90' };
+  } catch (error) {
+    primaryError = error.message;
+  }
+  try {
+    return { values: await openElevationWithRetry(points), source: 'Open-Elevation / SRTM 250 m fallback' };
+  } catch (error) {
+    openElevationError = error.message;
+  }
+  try {
+    const values = await fetchTerrariumElevations(points);
+    if (values.length !== points.length || values.some((value) => !Number.isFinite(value))) {
+      throw new Error('Terrarium returned no usable elevation.');
+    }
+    return { values, source: 'AWS Terrain Tiles / Terrarium fallback (≈150 m)' };
+  } catch (error) {
+    throw new Error(`Elevation unavailable. Open-Meteo: ${primaryError}; Open-Elevation: ${openElevationError}; Terrarium: ${error.message}`);
+  }
+}
+
+function terrainScalePlan(detailed) {
+  const scales = detailed
+    ? [['fine', 1], ['regional', 10], ['broad', 50]]
+    : [['regional', 10]];
+  return scales.map(([key, spacingKm]) => ({ key, spacingKm }));
 }
 
 /** Builds the adaptive 3×3 sampling grid (~20 km window) around a site. */
@@ -298,25 +519,73 @@ export function terrainFromElevations(centerLat, elevations, dLatDeg, dLonDeg, s
   };
 }
 
-/** Full Earth profile for one point: climate + terrain + derived indices. */
-export async function buildEarthProfile(analog) {
-  const { points, dLat, dLon } = terrainSamplePoints(analog.lat, analog.lon);
-  const [elevations, climateResult] = await Promise.all([
-    fetchElevations(points).catch((err) => ({ error: err })),
-    fetchClimate(analog.lat, analog.lon).catch((err) => ({ error: err })),
+/** Full Earth profile for one point: climate, multi-scale terrain and optional context. */
+export async function buildEarthProfile(analog, { detailed = false, includeContext = false } = {}) {
+  const plan = terrainScalePlan(detailed);
+  const grids = plan.map((scale) => ({
+    ...scale,
+    ...terrainSamplePoints(analog.lat, analog.lon, scale.spacingKm),
+  }));
+  const allPoints = grids.flatMap((grid) => grid.points);
+  const [elevationResult, climateResult, soilResult, volcanoResult] = await Promise.all([
+    fetchElevations(allPoints).catch((error) => ({ error })),
+    fetchClimate(analog.lat, analog.lon).catch((error) => ({ error })),
+    includeContext ? fetchSoil(analog.lat, analog.lon).catch((error) => ({ error })) : Promise.resolve(null),
+    includeContext ? fetchVolcanoContext(analog.lat, analog.lon).catch((error) => ({ error })) : Promise.resolve(null),
   ]);
+
   const climate = climateResult && !climateResult.error ? climateResult : null;
-  const terrain = Array.isArray(elevations) ? terrainFromElevations(analog.lat, elevations, dLat, dLon, 10) : null;
+  const soil = soilResult && !soilResult.error ? soilResult : null;
+  const volcano = volcanoResult && !volcanoResult.error ? volcanoResult : null;
+  const terrains = {};
+  if (elevationResult && !elevationResult.error) {
+    let offset = 0;
+    for (const grid of grids) {
+      const values = elevationResult.values.slice(offset, offset + 9);
+      offset += 9;
+      const terrain = terrainFromElevations(analog.lat, values, grid.dLat, grid.dLon, grid.spacingKm);
+      if (terrain) {
+        terrain.elevationSource = elevationResult.source;
+        terrain.datasetLabel = `${elevationResult.source} · ${grid.spacingKm} km sampling grid`;
+      }
+      terrains[grid.key] = terrain;
+    }
+  }
+  const terrain = terrains.regional || null;
+  const dataStatus = {
+    climate: climate
+      ? { ok: true, source: climate.source, detail: climate.period }
+      : { ok: false, error: climateResult?.error?.message || 'unknown climate service error' },
+    terrain: terrain
+      ? { ok: true, source: terrain.elevationSource, detail: `${grids.length} sampling scale${grids.length === 1 ? '' : 's'}` }
+      : { ok: false, error: elevationResult?.error?.message || 'unknown elevation service error' },
+    ...(includeContext
+      ? {
+          soil: soil
+            ? { ok: true, source: soil.source, detail: `${soil.textureClass || 'texture unavailable'} · ${soil.depth}` }
+            : { ok: false, error: soilResult?.error?.message || 'unknown SoilGrids error' },
+          volcano: volcano
+            ? { ok: true, source: volcano.source, detail: `${volcano.name} · ${Math.round(volcano.distanceKm)} km` }
+            : { ok: false, error: volcanoResult?.error?.message || 'unknown volcano catalog error' },
+        }
+      : {}),
+  };
+  const issues = [];
+  if (!climate) issues.push(`Climate normals unavailable: ${dataStatus.climate.error}`);
+  if (!terrain) issues.push(`Terrain unavailable: ${dataStatus.terrain.error}`);
   return {
     ...analog,
     climate,
     terrain,
+    terrainFine: terrains.fine || null,
+    terrainBroad: terrains.broad || null,
+    terrainSource: terrain?.elevationSource || null,
+    soil,
+    volcano,
+    dataStatus,
+    experimental: analog.id === 'custom-earth-point',
     fetchedAt: new Date().toISOString(),
-    dataIssue: !climate
-      ? `Climate normals unavailable: ${climateResult?.error?.message || 'unknown service error'}`
-      : !terrain
-        ? 'Elevation grid unavailable for this point.'
-        : null,
+    dataIssue: issues.length ? issues.join(' ') : null,
   };
 }
 

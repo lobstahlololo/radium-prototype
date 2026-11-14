@@ -272,6 +272,7 @@ export function comparePair(planet, earth) {
     grade: letterGrade(score),
     coverage: round(coverage, 2),
     confidence: round(confidence, 2),
+    experimental: Boolean(earth?.experimental),
     dimensions: dims,
     strong,
     weak,
@@ -282,6 +283,10 @@ export function comparePair(planet, earth) {
       'Planetary temperature, illumination and volatile values are regional estimates or published models, not measurements at the exact clicked point.',
       'Earth terrain metrics use a ~5 km elevation grid; planetary metrics use ~7.6 km DEM cells. Both are regional-scale comparisons.',
       ...(earth.climate?.source ? [] : ['Earth climate normals are unavailable for this candidate, so thermal and luminosity dimensions were dropped from the score.']),
+      ...(earth.terrain ? [] : ['Earth terrain measurements are unavailable for this candidate, so slope and roughness were dropped from the score.']),
+      ...(earth.experimental
+        ? ['Experimental clicked-point score: it is computed from the live comparable dimensions available at this coordinate, not from a curated analog dossier. SoilGrids topsoil and Smithsonian volcano proximity are context only and are not added to this numeric score.']
+        : []),
     ],
   };
 }
