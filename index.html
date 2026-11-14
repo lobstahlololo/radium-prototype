@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="RADIUM — interactive planetary exploration, explainable site assessment and data-driven Earth analog discovery for the NASA Space Apps Challenge." />
+  <title>RADIUM — Planetary Exploration & Terrestrial Analogs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/cesium@1.121.0/Build/Cesium/Widgets/widgets.css" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="css/radium.css" />
+</head>
+<body>
+  <div id="app" class="app" data-view="planet">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="RADIUM home">
+        <span class="brand-mark" aria-hidden="true">◈</span>
+        <span class="brand-text">
+          <span class="brand-name">RADIUM</span>
+          <span class="brand-sub">Planetary exploration · terrestrial analogs</span>
+        </span>
+      </a>
+      <nav class="topnav" aria-label="Information">
+        <button class="ghost-btn" id="btn-scope" type="button">Scope</button>
+        <button class="ghost-btn" id="btn-methodology" type="button">Methodology</button>
+        <button class="ghost-btn" id="btn-sources" type="button">Data sources</button>
+        <span class="mission-badge">NASA Space Apps 2026</span>
+      </nav>
+    </header>
+
+    <div class="bodybar">
+      <div class="planet-switch" role="tablist" aria-label="Select a body">
+        <button class="planet-tab" role="tab" data-body="earth" type="button"><span class="dot dot-earth"></span>Earth</button>
+        <button class="planet-tab is-active" role="tab" aria-selected="true" data-body="moon" type="button"><span class="dot dot-moon"></span>Moon</button>
+        <button class="planet-tab" role="tab" aria-selected="false" data-body="mars" type="button"><span class="dot dot-mars"></span>Mars</button>
+      </div>
+
+      <div class="mission-cluster">
+        <label class="select-label" for="mission-select">Mission</label>
+        <div class="select-wrap">
+          <select id="mission-select" aria-label="Mission profile"></select>
+        </div>
+        <button class="twin-btn" id="twin-toggle" type="button" aria-pressed="false">
+          <span class="twin-icon" aria-hidden="true">⧉</span>
+          <span>Earth Twin Mode</span>
+        </button>
+      </div>
+
+      <div class="status-pills" aria-live="polite">
+        <span class="pill" id="dem-status">DEM loading…</span>
+        <span class="pill pill-quiet" id="earth-status">Earth data idle</span>
+      </div>
+    </div>
+
+    <main class="workspace">
+      <aside class="rail rail-left" aria-label="Map layers and candidate ranking">
+        <section class="panel" id="panel-layers">
+          <div class="panel-head"><h2>Layers</h2><span class="panel-kicker" id="layers-kicker">Lunar surface</span></div>
+          <div class="panel-body" id="layers-body"></div>
+        </section>
+
+        <section class="panel" id="panel-priorities">
+          <div class="panel-head">
+            <h2>Mission priorities</h2>
+            <button class="mini-btn" id="reset-priorities" type="button">Reset</button>
+          </div>
+          <div class="panel-body" id="priorities-body"></div>
+        </section>
+
+        <section class="panel panel-grow" id="panel-candidates">
+          <div class="panel-head">
+            <h2 id="candidates-title">Candidate ranking</h2>
+            <span class="panel-kicker" id="candidates-kicker"></span>
+          </div>
+          <div class="panel-body list-body" id="candidates-body"></div>
+        </section>
+      </aside>
+
+      <section class="stage" aria-label="Interactive map">
+        <div class="stage-maps" id="stage-maps">
+          <div class="map-pane pane-globe" id="pane-globe">
+            <div class="pane-tag" id="globe-tag">Moon · 3D globe</div>
+            <div id="globe-container" class="map-canvas"></div>
+            <div class="map-errors" id="globe-errors" hidden></div>
+          </div>
+          <div class="map-pane pane-earth" id="pane-earth">
+            <div class="pane-tag" id="earth-tag">Earth · 2D map</div>
+            <div id="earth-container" class="map-canvas"></div>
+            <div class="map-errors" id="earth-errors" hidden></div>
+          </div>
+        </div>
+
+        <div class="stage-hud">
+          <div class="hud-left">
+            <span class="stage-title" id="stage-title">Moon</span>
+            <span class="stage-sub" id="stage-sub">Click a grade pin or anywhere on the surface</span>
+          </div>
+          <div class="coord-readout" id="coord-readout">—</div>
+        </div>
+
+        <div class="stage-overlay">
+          <div class="legend" id="legend" aria-live="polite"></div>
+          <div class="stage-note" id="stage-note"></div>
+          <div class="loading" id="stage-loading" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="stage-loading-text">Loading…</span>
+          </div>
+        </div>
+
+        <div class="map-hint" id="map-hint">
+          <span>Drag to rotate</span><span>Scroll to zoom</span><span>Click to analyse</span>
+        </div>
+      </section>
+
+      <aside class="rail rail-right" aria-label="Location analysis">
+        <div id="inspector" class="inspector"></div>
+      </aside>
+    </main>
+
+    <footer class="statusbar">
+      <span class="status-caveat">RADIUM grades are exploratory, RADIUM-defined assessments — not NASA certification.</span>
+      <span class="status-attr" id="attribution">Imagery: NASA LRO/LROC, MGS Viking, NASA GIBS · Climate: NASA POWER · DEM: LOLA, MOLA</span>
+    </footer>
+
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+    <div id="modal-root"></div>
+  </div>
+
+  <noscript>
+    <div class="noscript">RADIUM needs JavaScript enabled to render the planetary maps and run its scoring engine.</div>
+  </noscript>
+
+  <script src="https://unpkg.com/cesium@1.121.0/Build/Cesium/Cesium.js"></script>
+  <script>
+    window.CESIUM_BASE_URL = 'https://unpkg.com/cesium@1.121.0/Build/Cesium/';
+  </script>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+/** Physical and astronomical constants used across RADIUM. Sources: IAU 2015 nominal values, NASA fact sheets. */
+
+export const BODIES = {
+  moon: {
+    id: 'moon',
+    label: 'Moon',
+    radiusM: 1737400,
+    semiMajorM: 1737400,
+    flattening: 0,
+    gravity: 1.62,
+    gravitySource: 'NASA Moon fact sheet (surface gravity 1.62 m/s²)',
+    dayLengthH: 708.7,
+    obliquityDeg: 1.543,
+    meanSurfacePressureKPa: 0,
+    color: '#9fb4d8',
+    accent: '#7dd3fc',
+    mapCredit: 'NASA / LRO LROC WAC global mosaic (303 ppd) via NASA Solar System Treks',
+    hasAtmosphere: false,
+    datum: 'Sphere of radius 1,737.4 km; LOLA elevations relative to that reference radius.',
+  },
+  mars: {
+    id: 'mars',
+    label: 'Mars',
+    radiusM: 3396190,
+    polarRadiusM: 3376200,
+    semiMajorM: 3396190,
+    flattening: 0.00589,
+    gravity: 3.71,
+    gravitySource: 'NASA Mars fact sheet (surface gravity 3.71 m/s²)',
+    dayLengthH: 24.66,
+    obliquityDeg: 25.19,
+    meanSurfacePressureKPa: 0.61,
+    color: '#e2906a',
+    accent: '#fb923c',
+    mapCredit: 'NASA / MGS Viking MDIM21 color mosaic (232 m) via NASA Solar System Treks',
+    hasAtmosphere: true,
+    datum: 'IAU 2000 areoid (GMM3, degree and order 50); MOLA topography relative to the areoid.',
+  },
+  earth: {
+    id: 'earth',
+    label: 'Earth',
+    radiusM: 6378137,
+    semiMajorM: 6378137,
+    flattening: 1 / 298.257223563,
+    gravity: 9.81,
+    dayLengthH: 24,
+    obliquityDeg: 23.44,
+    meanSurfacePressureKPa: 101.3,
+    color: '#6ee7b7',
+    accent: '#34d399',
+    mapCredit: 'NASA Blue Marble / shaded relief (NASA GIBS)',
+    hasAtmosphere: true,
+    datum: 'WGS84 / EPSG:3857 for web maps.',
+  },
+};
+
+export const MISSION_CAVEAT =
+  'RADIUM grades are exploratory, RADIUM-defined scientific assessments. They are not NASA certification, landing approval, or a substitute for mission-specific engineering analysis.';

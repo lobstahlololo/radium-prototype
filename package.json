@@ -1,0 +1,16 @@
+{
+  "name": "radium",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "RADIUM — interactive planetary exploration and terrestrial analog discovery for the NASA Space Apps Challenge.",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
+    "test": "node --test tests/science.test.mjs tests/data.test.mjs",
+    "data": "node tools/prepare-data.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
