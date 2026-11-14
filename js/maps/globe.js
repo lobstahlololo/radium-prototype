@@ -49,6 +49,7 @@ export class PlanetGlobe {
     this.markerLayer = null;
     this._markers = new Map();
     this._removeMarkerListener = null;
+    this._viewport = { width: 0, height: 0 };
   }
 
   async init() {
@@ -85,6 +86,7 @@ export class PlanetGlobe {
       globe: new C.Globe(radius),
       mapProjection: new C.GeographicProjection(radius),
       targetFrameRate: 30,
+      useBrowserRecommendedResolution: false,
       requestRenderMode: true,
       maximumRenderTimeChange: Infinity,
       contextOptions: { webgl: { alpha: false, preserveDrawingBuffer: false } },
@@ -101,11 +103,14 @@ export class PlanetGlobe {
     // costs a large amount of fill rate. Mars gets a looser screen-space error
     // target because its 232 m global mosaic is the expensive layer while the
     // markers and DEM overlays stay independent of imagery detail.
+    this.viewer.useBrowserRecommendedResolution = false;
+    this.viewer.resolutionScale = 1;
     scene.msaaSamples = 1;
     scene.postProcessStages.fxaa.enabled = false;
-    scene.globe.maximumScreenSpaceError = this.body === 'mars' ? 4 : 3;
+    scene.globe.maximumScreenSpaceError = 4;
     scene.globe.tileCacheSize = 96;
     scene.globe.preloadAncestors = false;
+    scene.globe.preloadSiblings = false;
     scene.requestRenderMode = true;
     scene.maximumRenderTimeChange = Infinity;
     scene.screenSpaceCameraController.inertiaSpin = 0.78;
@@ -113,6 +118,7 @@ export class PlanetGlobe {
     scene.screenSpaceCameraController.inertiaZoom = 0.62;
     this.container.dataset.renderMode = 'request';
     this.container.dataset.msaa = '1';
+    this.container.dataset.resolutionScale = '1';
     this.container.dataset.screenSpaceError = String(scene.globe.maximumScreenSpaceError);
 
     const tilingScheme = new C.GeographicTilingScheme({ ellipsoid: radius });
@@ -160,6 +166,7 @@ export class PlanetGlobe {
     this.markerLayer = document.createElement('div');
     this.markerLayer.className = 'globe-marker-layer';
     this.container.appendChild(this.markerLayer);
+    this._cacheViewport();
     this._removeMarkerListener = scene.postRender.addEventListener(() => this.updateMarkerPositions());
 
     this.onStatus?.({ type: 'globe', ok: true, message: `${cfg.credit}` });
@@ -196,36 +203,51 @@ export class PlanetGlobe {
         // Markers sit on the visible ellipsoid, not at DEM elevation. The globe
         // is smooth, so an elevation offset would sink or float the pin.
         position: C.Cartesian3.fromDegrees(site.lon, site.lat, 0, this.ellipsoid),
+        lastX: null,
+        lastY: null,
       });
     }
     this.updateMarkerPositions();
     this.viewer.scene.requestRender();
   }
 
+  _cacheViewport() {
+    this._viewport = { width: this.container.clientWidth, height: this.container.clientHeight };
+  }
+
   updateMarkerPositions() {
     if (!this.viewer || !this.markerLayer) return;
     const C = window.Cesium;
     const scene = this.viewer.scene;
+    const { width, height } = this._viewport;
+    if (!width || !height) return;
     const occluder = new C.EllipsoidalOccluder(this.ellipsoid, scene.camera.positionWC);
-    const width = this.container.clientWidth;
-    const height = this.container.clientHeight;
     for (const marker of this._markers.values()) {
       const screen = C.SceneTransforms.worldToWindowCoordinates(scene, marker.position);
       const visible = Boolean(screen) && occluder.isPointVisible(marker.position)
         && screen.x > -48 && screen.x < width + 48
         && screen.y > -64 && screen.y < height + 24;
       if (!visible) {
-        marker.el.hidden = true;
+        if (!marker.el.hidden) marker.el.hidden = true;
         continue;
       }
-      marker.el.hidden = false;
-      marker.el.style.transform = `translate3d(${screen.x.toFixed(1)}px, ${screen.y.toFixed(1)}px, 0) translate(-50%, -100%)`;
+      if (marker.el.hidden) marker.el.hidden = false;
+      const x = Math.round(screen.x * 2) / 2;
+      const y = Math.round(screen.y * 2) / 2;
+      if (marker.lastX === x && marker.lastY === y) continue;
+      marker.lastX = x;
+      marker.lastY = y;
+      marker.el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -100%)`;
     }
   }
 
   highlight(siteId) {
     this.selectedId = siteId;
-    this.setSites(this.sites);
+    for (const [id, marker] of this._markers) {
+      marker.el.classList.toggle('is-selected', id === siteId);
+    }
+    this.updateMarkerPositions();
+    this.viewer?.scene.requestRender();
   }
 
   setBaseVisible(visible) {
@@ -260,7 +282,7 @@ export class PlanetGlobe {
     const cfg = IMAGERY[this.body];
     this.viewer.camera.flyTo({
       destination: C.Cartesian3.fromDegrees(lon, lat, height ?? cfg.height, this.ellipsoid),
-      duration: cfg === IMAGERY.mars ? 0.85 : 1.05,
+      duration: cfg === IMAGERY.mars ? 0.72 : 0.85,
     });
   }
 
@@ -270,12 +292,14 @@ export class PlanetGlobe {
     const cfg = IMAGERY[this.body];
     this.viewer.camera.flyTo({
       destination: C.Cartesian3.fromDegrees(0, 0, cfg.overview, this.ellipsoid),
-      duration: cfg === IMAGERY.mars ? 0.85 : 1.05,
+      duration: cfg === IMAGERY.mars ? 0.72 : 0.85,
     });
   }
 
   resize() {
+    this._cacheViewport();
     this.viewer?.resize();
+    this.viewer?.scene.requestRender();
   }
 
   destroy() {

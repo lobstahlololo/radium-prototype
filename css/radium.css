@@ -566,7 +566,6 @@ input[type='range'] {
   background: var(--gbg, rgba(148, 163, 184, 0.12));
   border: 1.5px solid var(--gc, #94a3b8);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.65), inset 0 0 10px var(--gbg);
-  backdrop-filter: blur(3px);
 }
 .globe-marker-tip {
   width: 0;
@@ -610,16 +609,18 @@ input[type='range'] {
 
 /* earth pins */
 .earth-pin {
-  position: relative;
-  display: block;
+  /* MapLibre positions markers absolutely. Keeping the button in normal flow
+     offsets it by its document position before the map transform is applied. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
   width: 24px;
   height: 24px;
   border: 0;
   background: transparent;
   padding: 0;
-  /* Keep the MapLibre anchor box fixed. Labels are positioned outside the box
-     so revealing them at zoom cannot re-center the dot away from its point. */
-  transform: none;
 }
 .earth-pin .pin-dot { position: relative; z-index: 1; }
 .pin-dot {
@@ -883,6 +884,19 @@ table { border-collapse: collapse; width: 100%; }
 .top-five-mini { height: 3px; margin-top: 4px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, 0.12); }
 .top-five-mini span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, rgba(125, 211, 252, 0.3), var(--accent)); }
 .top-five-table tr:last-child th, .top-five-table tr:last-child td { border-bottom: 0; }
+
+/* rated comparison groups */
+.compare-sections { display: grid; gap: 10px; }
+.compare-section { padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: rgba(148, 163, 184, 0.025); }
+.compare-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.compare-section-head strong { font-size: 10px; line-height: 1.35; color: var(--text); font-weight: 600; }
+.compare-section-score { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 10px; color: var(--accent); }
+.compare-section-score .grade-chip { min-width: 19px; height: 19px; padding: 0 3px; font-size: 9px; }
+.compare-section-track { height: 4px; margin: 7px 0 5px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, 0.11); }
+.compare-section-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, rgba(125, 211, 252, 0.3), var(--accent)); }
+.compare-section .system-bar { padding: 7px 0 8px; }
+.space-table td { min-width: 104px; }
+.space-table td .top-five-mini { margin-top: 5px; }
 
 .metric-grid {
   display: grid;

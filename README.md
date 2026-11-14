@@ -46,7 +46,7 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | Head-to-head: retain a Moon/Mars site, then click any Earth pin for factor-by-factor comparison | Working |
 | Statistical shortlist of less-studied Earth candidates for the selected planetary site | Working (curated pool only) |
 | 0–100 Earth similarity estimates on every pin, candidate row and comparison hero | Working |
-| Top-five-only compare matrix across every scored dimension plus albedo, aridity and elevation | Working |
+| Top-five-only Earth-analog matrix in Twin Mode, plus top-five Moon/Mars comparison for any Earth site | Working |
 | Earth Twin Mode: live NASA POWER/DEM measurements, top-five terrestrial analogs, dimension grades | Working |
 | Earth dossier: overall best-planet match, eight-factor analog profile, brightness/albedo factors, explicit data gaps | Working |
 | Side-by-side comparison, strong/weak matches, applications, physical mismatches | Working |

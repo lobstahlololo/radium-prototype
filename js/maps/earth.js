@@ -208,7 +208,7 @@ export class EarthMap {
   }
 
   flyTo(lat, lon, zoom = 5) {
-    this.map?.flyTo({ center: [lon, lat], zoom, duration: 1100 });
+    this.map?.flyTo({ center: [lon, lat], zoom, duration: 700, essential: true });
   }
 
   resize() {
