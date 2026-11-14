@@ -591,7 +591,7 @@ input[type='range'] {
   pointer-events: none;
 }
 .globe-marker:hover .globe-marker-label,
-.globe-marker.is-selected .globe-marker-label { display: block; }
+.globe-marker:focus-visible .globe-marker-label { display: block; }
 .globe-marker.is-selected { width: 40px; height: 46px; z-index: 4; }
 .globe-marker.is-selected .globe-marker-badge {
   width: 40px;
