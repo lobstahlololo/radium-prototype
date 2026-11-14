@@ -53,7 +53,7 @@ export class EarthMap {
     this.map = null;
   }
 
-  init() {
+  async init() {
     if (!window.maplibregl) throw new Error('MapLibre GL could not be loaded (check the network connection).');
     this.map = new window.maplibregl.Map({
       container: this.container,
@@ -94,6 +94,34 @@ export class EarthMap {
       this.onMove?.({ lat: e.lngLat.lat, lon: e.lngLat.lng });
     });
     this.map.on('zoom', () => this.updateLabelClass());
+
+    // MapLibre constructs the map asynchronously. Calling setLayoutProperty()
+    // before the inline style has loaded throws "Style is not done loading",
+    // which previously surfaced as "Earth map unavailable" on slower loads.
+    await new Promise((resolve, reject) => {
+      const map = this.map;
+      if (map.isStyleLoaded()) {
+        resolve();
+        return;
+      }
+      const cleanup = () => {
+        clearTimeout(timer);
+        map.off('styledata', check);
+        map.off('load', check);
+      };
+      const check = () => {
+        if (!map.isStyleLoaded()) return;
+        cleanup();
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('The Earth basemap style did not finish loading. Check the network connection and retry.'));
+      }, 15000);
+      map.on('styledata', check);
+      map.on('load', check);
+      check();
+    });
     return this;
   }
 
