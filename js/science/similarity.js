@@ -293,3 +293,109 @@ export function rankAnalogs(planet, earthCandidates) {
     .filter((r) => r.score !== null)
     .sort((a, b) => b.score - a.score || b.confidence - a.confidence);
 }
+
+/**
+ * Ranks planetary sites for one Earth candidate, best first. This is the inverse
+ * direction of rankAnalogs and answers "which Moon/Mars site does this Earth
+ * place most closely resemble?".
+ */
+export function rankPlanetMatches(earth, planetCandidates) {
+  return planetCandidates
+    .map((planet) => ({
+      ...comparePair(planet, earth),
+      planetSite: planet.site,
+      planetBody: planet.body,
+    }))
+    .filter((r) => r.score !== null)
+    .sort((a, b) => b.score - a.score || b.confidence - a.confidence);
+}
+
+/**
+ * The eight requested Earth assessment categories, grouped from the comparable
+ * similarity dimensions. Categories without a comparable dataset remain
+ * explicitly unassessed; they are never filled with a synthetic grade.
+ *
+ * `dimensionIds` are combined with the effective weights from comparePair, so
+ * a group grade is still a similarity percentage, not an absolute habitat score.
+ */
+export const EARTH_FACTOR_GROUPS = [
+  {
+    id: 'materials',
+    label: 'Geology, mineralogy & surface materials',
+    dimensionIds: ['substrate'],
+    note: 'Categorical surface-material affinity only. Similar appearance does not establish similar mineralogy.',
+  },
+  {
+    id: 'terrain',
+    label: 'Terrain, elevation, slope, roughness & craters',
+    dimensionIds: ['slope', 'roughness'],
+    note: 'Slope and regional roughness are measured. Elevation offset and crater populations are not scored.',
+  },
+  {
+    id: 'environment',
+    label: 'Temperature, illumination & environmental extremes',
+    dimensionIds: ['thermalMean', 'thermalAmp', 'solar'],
+    note: 'Mean/diurnal thermal proxy and annual solar fraction. Polar illumination time is reported separately.',
+  },
+  {
+    id: 'volatiles',
+    label: 'Water, ice, permafrost & potential resources',
+    dimensionIds: ['volatile'],
+    note: 'Volatile-setting affinity, not a comparison of water quantity or extractable reserves.',
+  },
+  {
+    id: 'processes',
+    label: 'Dust, wind, erosion & atmospheric / surface processes',
+    dimensionIds: [],
+    unratedReason: 'No comparable dust, wind or erosion measurements are held for both the planet and Earth candidate.',
+  },
+  {
+    id: 'biology',
+    label: 'Biology, extremophiles, habitability & biosignatures',
+    dimensionIds: [],
+    unratedReason: 'RADIUM does not hold comparable biological or biosignature measurements for planetary sites.',
+  },
+  {
+    id: 'subsurface',
+    label: 'Caves, lava tubes, underground environments & subsurface',
+    dimensionIds: [],
+    unratedReason: 'Subsurface and cave datasets are not mapped consistently at these sites, so no grade is issued.',
+  },
+  {
+    id: 'operations',
+    label: 'Landing, mobility, navigation, robotics, human exploration & construction',
+    dimensionIds: ['slope', 'roughness'],
+    partial: true,
+    note: 'Terrain-only match. Gravity, pressure, radiation, dust, infrastructure and vehicle limits are excluded.',
+  },
+];
+
+/** Builds the eight factor rows for an Earth-vs-planet comparison. */
+export function earthFactorGrades(compare) {
+  return EARTH_FACTOR_GROUPS.map((group) => {
+    const dims = group.dimensionIds
+      .map((id) => compare.dimensions.find((d) => d.id === id))
+      .filter((d) => d?.available);
+    if (!dims.length) {
+      return {
+        ...group,
+        available: false,
+        grade: null,
+        similarity: null,
+        coverage: 0,
+        status: 'unassessed',
+      };
+    }
+    const weight = dims.reduce((sum, d) => sum + d.effectiveWeight, 0);
+    const similarity = weight > 0 ? dims.reduce((sum, d) => sum + d.similarity * d.effectiveWeight, 0) / weight : null;
+    return {
+      ...group,
+      available: similarity !== null,
+      grade: similarity === null ? null : letterGrade(similarity * 100),
+      similarity: similarity === null ? null : round(similarity, 3),
+      coverage: round(weight, 2),
+      status: group.partial ? 'partial' : 'assessed',
+      dimensions: dims.map((d) => d.id),
+    };
+  });
+}

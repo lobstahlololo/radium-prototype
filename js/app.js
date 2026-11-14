@@ -14,7 +14,7 @@ import { EARTH_ANALOGS } from './data/analogs.js';
 import { getDataset } from './data/datasets.js';
 import { MISSION_PROFILES, FACTORS, computeSuitability, profileForBody, weightShares } from './science/suitability.js';
 import { letterGrade, gradeMeta, confidenceLabel, round, UNRATED, fmt } from './science/grade.js';
-import { comparePair, rankAnalogs, SIMILARITY_DIMENSIONS } from './science/similarity.js';
+import { comparePair, rankAnalogs, rankPlanetMatches, earthFactorGrades, SIMILARITY_DIMENSIONS } from './science/similarity.js';
 import { effectiveSolar, marsPressureKPa } from './science/solar.js';
 import { loadDem } from './science/terrain.js';
 import { buildTerrainRaster, TERRAIN_LAYERS } from './maps/dem-layer.js';
@@ -54,7 +54,14 @@ const state = {
   earthPoolState: 'idle',
   earthPoolProgress: null,
   earthPoolPromise: null,
-  twin: { active: false, planetSiteId: null, rankings: [], selectedAnalogId: null, compare: null, custom: null },
+  earthMatches: {},
+  earthMatchPromises: new Map(),
+  earthMatchErrors: {},
+  earthPoolRatingState: 'idle',
+  earthPoolRatingPromise: null,
+  planetMatchPool: null,
+  planetMatchPoolPromise: null,
+  twin: { active: false, planetSiteId: null, rankings: [], measuredCount: 0, selectedAnalogId: null, compare: null, custom: null },
   lastRecalc: null,
   loading: null,
 };
@@ -102,6 +109,105 @@ function nearestSite(body, lat, lon) {
     if (!best || km < best.km) best = { site, km };
   }
   return best;
+}
+
+function earthMatchKey(profile) {
+  return profile.id === 'custom-earth-point'
+    ? `custom:${Number(profile.lat).toFixed(3)},${Number(profile.lon).toFixed(3)}`
+    : profile.id;
+}
+
+/** Loads both planetary DEMs once so an Earth site can be matched against every curated site. */
+function ensurePlanetMatchPool() {
+  if (state.planetMatchPool) return Promise.resolve(state.planetMatchPool);
+  if (state.planetMatchPoolPromise) return state.planetMatchPoolPromise;
+  const promise = (async () => {
+    await Promise.all(
+      ['moon', 'mars'].map(async (body) => {
+        if (!state.dems[body]) state.dems[body] = await loadDem(body);
+      }),
+    );
+    const pool = [];
+    for (const body of ['moon', 'mars']) {
+      const dem = state.dems[body];
+      if (!dem) throw new Error(`${BODIES[body].label} DEM unavailable for planetary matching.`);
+      for (const site of BODY_SITES[body]) {
+        pool.push({ site, terrain: dem.sample(site.lat, site.lon), body });
+      }
+    }
+    state.planetMatchPool = pool;
+    return pool;
+  })();
+  state.planetMatchPoolPromise = promise;
+  promise.then(
+    () => { state.planetMatchPoolPromise = null; },
+    () => { state.planetMatchPoolPromise = null; },
+  );
+  return promise;
+}
+
+function ensureEarthMatches(profile) {
+  const key = earthMatchKey(profile);
+  if (state.earthMatches[key]) return Promise.resolve(state.earthMatches[key]);
+  if (state.earthMatchPromises.has(key)) return state.earthMatchPromises.get(key);
+  const promise = (async () => {
+    const planets = await ensurePlanetMatchPool();
+    const matches = rankPlanetMatches(profile, planets);
+    state.earthMatches[key] = matches;
+    delete state.earthMatchErrors[key];
+    return matches;
+  })();
+  state.earthMatchPromises.set(key, promise);
+  promise.then(
+    () => { if (state.earthMatchPromises.get(key) === promise) state.earthMatchPromises.delete(key); },
+    () => { if (state.earthMatchPromises.get(key) === promise) state.earthMatchPromises.delete(key); },
+  );
+  return promise;
+}
+
+async function queueEarthMatch(profile) {
+  const key = earthMatchKey(profile);
+  try {
+    await ensureEarthMatches(profile);
+  } catch (err) {
+    state.earthMatchErrors[key] = err.message;
+  }
+  if (state.selection?.kind === 'earth' && earthMatchKey(state.selection.profile) === key) {
+    renderInspector();
+    updateEarthMarkers();
+  }
+}
+
+/** Rates every Earth candidate against its best planetary match once the live pool is ready. */
+async function rateEarthPool() {
+  if (state.earthPoolRatingState === 'ready' || !state.earthPool.length) return;
+  if (state.earthPoolRatingPromise) return state.earthPoolRatingPromise;
+  const promise = (async () => {
+    state.earthPoolRatingState = 'loading';
+    await Promise.all(
+      state.earthPool
+        .filter((profile) => profile.climate || profile.terrain)
+        .map(async (profile) => {
+          try {
+            await ensureEarthMatches(profile);
+          } catch (err) {
+            state.earthMatchErrors[earthMatchKey(profile)] = err.message;
+          }
+        }),
+    );
+    state.earthPoolRatingState = 'ready';
+  })();
+  state.earthPoolRatingPromise = promise;
+  try {
+    return await promise;
+  } finally {
+    state.earthPoolRatingPromise = null;
+    if (state.body === 'earth' && !state.twin.active) {
+      renderCandidates();
+      updateEarthMarkers();
+      if (state.selection?.kind === 'earth') renderInspector();
+    }
+  }
 }
 
 function toast(message, kind = 'info', ms = 6000) {
@@ -321,17 +427,22 @@ async function ensureEarthMap() {
 function updateEarthMarkers() {
   if (!state.earthMap) return;
   if (state.twin.active) {
-    const byId = new Map(state.twin.rankings.map((r) => [r.earthId, r]));
-    const items = EARTH_ANALOGS.map((a) => ({
-      id: a.id,
-      name: a.name,
-      country: a.country,
-      lat: a.lat,
-      lon: a.lon,
-      grade: byId.get(a.id)?.grade ?? UNRATED,
-      selected: state.twin.selectedAnalogId === a.id,
-      established: a.established,
-    }));
+    const items = state.twin.rankings
+      .map((r) => {
+        const analog = EARTH_ANALOGS.find((a) => a.id === r.earthId);
+        if (!analog) return null;
+        return {
+          id: analog.id,
+          name: analog.name,
+          country: analog.country,
+          lat: analog.lat,
+          lon: analog.lon,
+          grade: r.grade,
+          selected: state.twin.selectedAnalogId === analog.id,
+          established: analog.established,
+        };
+      })
+      .filter(Boolean);
     state.earthMap.setMarkers(items, (id) => selectEarthAnalog(id));
   } else {
     state.earthMap.setMarkers(
@@ -341,7 +452,7 @@ function updateEarthMarkers() {
         country: a.country,
         lat: a.lat,
         lon: a.lon,
-        grade: UNRATED,
+        grade: state.earthMatches[a.id]?.[0]?.grade ?? UNRATED,
         selected: state.selection?.kind === 'earth' && state.selection.profile?.id === a.id,
       })),
       (id) => selectEarthAnalog(id),
@@ -358,6 +469,8 @@ async function selectEarthAnalog(id) {
     if (state.twin.active && selectedAssessment()) {
       setTwinComparison(cached);
       state.selection = { kind: 'twin', analogId: id };
+    } else {
+      queueEarthMatch(cached);
     }
     renderInspector();
     updateEarthMarkers();
@@ -373,6 +486,8 @@ async function selectEarthAnalog(id) {
     if (state.twin.active && selectedAssessment()) {
       setTwinComparison(profile);
       state.selection = { kind: 'twin', analogId: id };
+    } else {
+      queueEarthMatch(profile);
     }
   } catch (err) {
     state.selection = { kind: 'earth-error', name: analog.name, message: err.message };
@@ -402,6 +517,8 @@ async function onEarthPick({ lat, lon }) {
       const planet = selectedAssessment();
       state.twin.compare = comparePair({ site: planet.site, terrain: planet.terrain, body: state.body }, profile);
       state.twin.custom = profile;
+    } else {
+      queueEarthMatch(profile);
     }
   } catch (err) {
     state.selection = { kind: 'earth-error', name: 'Custom Earth point', message: err.message };
@@ -476,10 +593,12 @@ function computeTwinRankings() {
     state.twin.rankings = [];
     return;
   }
-  state.twin.rankings = rankAnalogs(
+  const ranked = rankAnalogs(
     { site: planet.site, terrain: planet.terrain, body: state.body },
     state.earthPool.filter((p) => p.climate || p.terrain),
   );
+  state.twin.measuredCount = ranked.length;
+  state.twin.rankings = ranked.slice(0, 5);
 }
 
 async function activateTwin() {
@@ -518,6 +637,7 @@ async function activateTwin() {
 function deactivateTwin() {
   state.twin.active = false;
   state.twin.rankings = [];
+  state.twin.measuredCount = 0;
   state.twin.selectedAnalogId = null;
   state.twin.compare = null;
   state.twin.custom = null;
@@ -560,6 +680,8 @@ function ensureEarthPool() {
         renderAll();
         const sel = EARTH_ANALOGS.find((a) => a.id === state.twin.selectedAnalogId);
         if (sel) state.earthMap?.flyTo(sel.lat, sel.lon, 2.4);
+      } else if (state.body === 'earth') {
+        rateEarthPool();
       }
       return pool;
     })
@@ -683,8 +805,8 @@ function renderCandidates() {
   const bodyEl = candidatesBody;
 
   if (state.twin.active) {
-    title.textContent = 'Earth analog ranking';
-    kicker.textContent = state.earthPoolState === 'ready' ? `${state.twin.rankings.length} matched` : 'live measurements';
+    title.textContent = 'Top 5 Earth analogs';
+    kicker.textContent = state.earthPoolState === 'ready' ? `of ${state.twin.measuredCount} measured` : 'live measurements';
     if (state.earthPoolState === 'loading') {
       const p = state.earthPoolProgress;
       bodyEl.innerHTML = `
@@ -718,20 +840,36 @@ function renderCandidates() {
     return;
   }
 
-  title.textContent = 'Candidate ranking';
   if (state.body === 'earth') {
-    kicker.textContent = 'curated pool · live climate';
+    title.textContent = 'Earth analog grades';
+    kicker.textContent =
+      state.earthPoolRatingState === 'loading'
+        ? 'rating Earth sites…'
+        : state.earthPoolState === 'loading'
+          ? 'live climate loading…'
+          : 'overall + 8 factors';
     bodyEl.innerHTML = EARTH_ANALOGS.map(
-      (a, i) => `<button type="button" class="candidate-row" data-analog="${a.id}">
-        <span class="rank">${String(i + 1).padStart(2, '0')}</span>
-        <span class="cand-main"><strong>${esc(a.name)}</strong><em>${esc(a.country)} · ${humanize(a.substrateGroup)}</em></span>
-        <span class="cand-strength">${a.established ? 'Established analog' : 'Less-studied'}</span>
-        ${gradeChip(UNRATED)}
-      </button>`,
+      (a, i) => {
+        const best = state.earthMatches[a.id]?.[0];
+        const strength = best
+          ? `Mimics ${best.planetSite.name}`
+          : state.earthPoolState === 'loading' || state.earthPoolRatingState === 'loading'
+            ? 'Measuring…'
+            : state.earthMatchErrors[a.id]
+              ? 'Match unavailable'
+              : 'Open to rate';
+        return `<button type="button" class="candidate-row ${state.selection?.kind === 'earth' && state.selection.profile?.id === a.id ? 'is-selected' : ''}" data-analog="${a.id}">
+          <span class="rank">${String(i + 1).padStart(2, '0')}</span>
+          <span class="cand-main"><strong>${esc(a.name)}</strong><em>${esc(a.country)} · ${humanize(a.substrateGroup)}</em></span>
+          <span class="cand-strength">${esc(strength)}</span>
+          ${gradeChip(best?.grade ?? UNRATED)}
+        </button>`;
+      },
     ).join('');
     return;
   }
 
+  title.textContent = 'Mission suitability';
   kicker.textContent = `${MISSION_PROFILES[state.missionId]?.short || ''} · ${getAssessed().length} sites`;
   bodyEl.innerHTML = sortedAssessments()
     .map((r, i) => {
@@ -755,10 +893,10 @@ function renderStageChrome() {
   const sub = $('#stage-sub');
   if (twin) {
     title.textContent = `${bodyMeta.label} ↔ Earth`;
-    sub.textContent = 'Earth Twin Mode · select any planet site, compare terrestrial analogs';
+    sub.textContent = 'Earth Twin Mode · top five terrestrial analogs for the selected planetary site';
   } else if (state.body === 'earth') {
     title.textContent = 'Earth';
-    sub.textContent = 'NASA GIBS layers · click anywhere for live NASA POWER climate and DEM terrain';
+    sub.textContent = 'NASA GIBS layers · overall analog grade and eight-factor profile from live climate and DEM data';
   } else {
     title.textContent = `${bodyMeta.label} · ${MISSION_PROFILES[state.missionId]?.label || ''}`;
     sub.textContent = 'Click a grade pin or anywhere on the surface for measurements';
@@ -814,7 +952,7 @@ function renderLegend() {
   el.innerHTML = `
     <div class="legend-head"><span>${earthActive ? 'Earth analog pins' : 'Site suitability'}</span><em>letters</em></div>
     <div class="legend-grades">${['A', 'B', 'C', 'D', 'F'].map((g) => `${gradeChip(g)}<span>${gradeMeta(g).label}</span>`).join('')}</div>
-    <p class="legend-note">${earthActive ? 'Pin letters are Earth analog similarity grades against the selected planetary site.' : 'Letter grades from the weighted mission assessment. Hover a pin for its name; click for evidence.'}</p>`;
+    <p class="legend-note">${earthActive ? 'Pin letters are Earth analog grades. Twin Mode shows the top five matches; Earth view shows each site’s best planetary match.' : 'Letter grades from the weighted mission assessment. Hover a pin for its name; click for evidence.'}</p>`;
 }
 
 function resizeMaps() {
@@ -1045,24 +1183,71 @@ function renderEarthIntro() {
   return `
     <div class="inspector-head">
       <p class="eyebrow">Earth · terrestrial analogs</p>
-      <h2>Which Earth places match the Moon or Mars?</h2>
-      <p class="lede">RADIUM's Earth Twin Mode compares a selected planetary site with a curated pool of ${EARTH_ANALOGS.length} terrestrial candidates using live NASA POWER climate and Copernicus DEM terrain.</p>
+      <h2>What does each Earth site resemble?</h2>
+      <p class="lede">RADIUM rates all ${EARTH_ANALOGS.length} curated Earth candidates against every Moon and Mars site. Each gets an overall analog grade, the closest planetary match, and an eight-factor profile.</p>
     </div>
     <div class="steps">
-      <div><span>1</span><p>Select a Moon or Mars site with a letter grade.</p></div>
-      <div><span>2</span><p>Activate Earth Twin Mode to fetch Earth measurements and rank analogs.</p></div>
-      <div><span>3</span><p>Open a candidate for a side-by-side, dimension-by-dimension comparison.</p></div>
+      <div><span>1</span><p>Earth sites are measured with live NASA POWER climate and Copernicus DEM terrain.</p></div>
+      <div><span>2</span><p>The closest curated Moon or Mars site sets the overall match grade.</p></div>
+      <div><span>3</span><p>Open any candidate for its eight-factor profile and the gaps RADIUM does not rate.</p></div>
     </div>
-    <p class="fine">You can also click any point on this map to retrieve real NASA POWER climate normals and DEM-derived terrain for that coordinate. Surface-material class is not mapped at arbitrary points, so material dimensions are dropped from any similarity calculation there.</p>
+    <p class="fine">Earth grades are analog-similarity grades, not mission-suitability grades. Select a Moon or Mars site and use Earth Twin Mode to see that site's top five terrestrial analogs.</p>
     <div class="action-row"><button type="button" class="solid-btn" data-action="go-moon">Choose a lunar site</button><button type="button" class="ghost-btn" data-action="go-mars">Choose a Mars site</button></div>
     <p class="caveat">${MISSION_CAVEAT}</p>`;
+}
+
+function renderMimicBlock(matches) {
+  if (!matches.length) return '';
+  return `<section class="panel-section">
+    <div class="section-head"><h3>Closest planetary matches</h3><span class="fine">best first</span></div>
+    <div class="mimic-list">
+      ${matches
+        .slice(0, 3)
+        .map(
+          (m, i) => `<div class="mimic-row ${i === 0 ? 'is-best' : ''}">
+            <span class="rank">${String(i + 1).padStart(2, '0')}</span>
+            <span class="mimic-main"><strong>${esc(m.planetSite.name)}</strong><em>${esc(BODIES[m.planetBody]?.label || m.planetBody)} · ${esc(gradeMeta(m.grade).label)} analog match</em></span>
+            ${gradeChip(m.grade)}
+          </div>`,
+        )
+        .join('')}
+    </div>
+    <p class="fine">The best match sets the overall grade and the eight-factor profile. Ranked across ${matches.length} curated planetary sites using the comparable dimensions.</p>
+  </section>`;
+}
+
+function renderEarthFactorSection(compare) {
+  const factors = earthFactorGrades(compare);
+  return `<section class="panel-section">
+    <div class="section-head"><h3>Eight-factor analog profile</h3><span class="fine">letters, gaps shown</span></div>
+    <p class="fine">Compared with <strong>${esc(compare.planetSite?.name || 'the selected planetary site')}</strong>. Factor grades describe resemblance, not standalone Earth suitability.</p>
+    <div class="earth-factor-list">
+      ${factors
+        .map(
+          (f) => `<article class="earth-factor-row ${f.available ? '' : 'is-missing'}">
+            <div class="earth-factor-grade">${f.available ? gradeChip(f.grade) : `<span class="na">${UNRATED}</span>`}</div>
+            <div class="earth-factor-copy">
+              <div class="earth-factor-title"><strong>${esc(f.label)}</strong>${f.available && !f.partial ? '' : `<span class="factor-status">${f.available ? 'partial' : 'not assessed'}</span>`}</div>
+              <p>${esc(f.available ? f.note : f.unratedReason)}</p>
+              ${f.available ? `<span class="dim-weight">${pct(f.coverage)} of match weight</span>` : ''}
+            </div>
+          </article>`,
+        )
+        .join('')}
+    </div>
+    <p class="fine"><strong>Not invented:</strong> dust/wind/erosion, biology/biosignatures and subsurface factors remain unrated because RADIUM has no comparable measurements for both sides. The operations row is terrain-only.</p>
+  </section>`;
 }
 
 function renderEarthInspector() {
   const profile = state.selection.profile;
   const c = profile.climate;
   const t = profile.terrain;
-  const compare = state.twin.active && state.body !== 'earth' ? state.twin.compare : null;
+  const key = earthMatchKey(profile);
+  const matches = state.earthMatches[key] || [];
+  const best = matches[0] || null;
+  const pending = state.earthMatchPromises.has(key);
+  const matchError = state.earthMatchErrors[key];
   return `
     <div class="inspector-head">
       <p class="eyebrow">Earth · ${esc(profile.country || 'custom coordinate')}</p>
@@ -1071,13 +1256,13 @@ function renderEarthInspector() {
     </div>
     ${contextFigure()}
     ${profile.dataIssue ? `<div class="alert alert-warn"><strong>Partial data.</strong> ${esc(profile.dataIssue)}</div>` : ''}
-    ${c ? (compare ? `<div class="grade-hero grade-${compare.grade}">
-      <div class="grade-orb">${compare.grade}</div>
-      <div class="grade-copy"><p class="grade-label">Earth analog grade</p>
-      <p class="grade-sub">Compared with ${esc(selectedAssessment()?.site.name || '')}</p>
-      <div class="chip-row"><span class="pill">Coverage ${pct(compare.coverage)}</span><span class="pill">Confidence ${confidenceLabel(compare.confidence)}</span></div></div>
-    </div>` : `<div class="alert alert-info"><strong>Live Earth measurements.</strong> ${esc(c.source)} · ${esc(c.period)}. Copernicus DEM terrain. Open Earth Twin Mode from a Moon or Mars site to compute a similarity grade for this point.</div>`) + `
-    <dl class="metric-list">
+    ${best ? `<div class="grade-hero grade-${best.grade}">
+      <div class="grade-orb">${best.grade}</div>
+      <div class="grade-copy"><p class="grade-label">Overall analog grade</p>
+      <p class="grade-sub">Mimics <strong>${esc(best.planetSite.name)}</strong> · ${esc(BODIES[best.planetBody]?.label || best.planetBody)}</p>
+      <div class="chip-row"><span class="pill">Coverage ${pct(best.coverage)}</span><span class="pill">Confidence ${confidenceLabel(best.confidence)}</span></div></div>
+    </div>` : pending ? `<div class="alert alert-info"><strong>Rating this Earth site…</strong> Loading both planetary DEMs and comparing against every curated Moon and Mars site. The live measurements below are already available.</div>` : matchError ? `<div class="alert alert-warn"><strong>Planetary match unavailable.</strong> ${esc(matchError)}</div>` : `<div class="alert alert-info"><strong>No comparable planetary match.</strong> The available measurements do not overlap enough with a curated planetary site to issue a grade.</div>`}
+    ${c ? `<dl class="metric-list">
       <div><dt>Mean air temperature</dt><dd>${c.tempMeanK} K <small>(${c.tempMeanC} °C)</small></dd>${evidenceChip('derived')}<p>${esc(c.tempType)}</p></div>
       <div><dt>Mean diurnal range</dt><dd>${c.diurnalAmpK ?? 'Data unavailable.'} K</dd><p>Daily max−min of 2 m air temperature, averaged over ${c.period}.</p></div>
       <div><dt>Annual precipitation</dt><dd>${c.precipMm ?? 'Data unavailable.'} mm</dd></div>
@@ -1092,8 +1277,9 @@ function renderEarthInspector() {
         <div><dt>Roughness</dt><dd>${t.roughnessM} <small>m σ</small></dd><span>${t.windowKm} km window</span></div>
         <div><dt>Sampling</dt><dd>${t.resolutionKm} <small>km</small></dd><span>9-point grid</span></div>
       </dl></section>` : '<p class="na">Elevation grid unavailable for this point.</p>'}
+    ${renderMimicBlock(matches)}
+    ${best ? renderEarthFactorSection(best) : ''}
     ${profile.geologyBasis ? `<section class="panel-section"><div class="section-head"><h3>Geology</h3></div><p>${esc(profile.geologyBasis)}</p><p class="fine"><strong>Analog status.</strong> ${profile.established ? 'Established planetary analog in published research.' : 'Less-studied candidate: this match is data-driven, not an established field analog.'}</p>${profile.protection ? `<p class="fine"><strong>Access.</strong> ${esc(profile.protection)}</p>` : ''}</section>` : ''}
-    ${compare ? renderComparisonBlock(compare) : state.twin.active ? `<div class="alert alert-info">Similarity needs a selected planetary site with material class. Switch to a Moon or Mars site to compare this Earth point.</div>` : ''}
     <section class="panel-section"><div class="section-head"><h3>Sources</h3></div>
       <ul class="source-list">${sourceLinks(['nasa_power', 'era5', 'copernicus_dem', 'gibs_blue_marble'])}</ul>
       ${c ? `<p class="fine">${esc(c.source)} · ${esc(c.period)}</p>` : ''}</section>`;
@@ -1396,10 +1582,14 @@ async function switchBody(body) {
     state.globeBody = null;
     setCoordReadout(0, 0, '');
     $('#coord-readout').textContent = '—';
+    setDemStatus('Earth terrain · Copernicus');
     renderMissionSelect();
     await ensureEarthMap();
     resizeMaps();
     renderAll();
+    ensureEarthPool().then(() => {
+      if (state.body === 'earth' && !state.twin.active) rateEarthPool();
+    });
     return;
   }
   state.missionId = missionFor(body);

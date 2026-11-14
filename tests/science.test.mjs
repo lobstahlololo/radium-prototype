@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { letterGrade, piecewise, GRADE_BANDS, UNRATED } from '../js/science/grade.js';
 import { MISSION_PROFILES, computeSuitability, weightShares, evaluateFactor } from '../js/science/suitability.js';
-import { comparePair, dimensionSimilarity, SUBSTRATE_AFFINITY, VOLATILE_AFFINITY, SIMILARITY_DIMENSIONS } from '../js/science/similarity.js';
+import { comparePair, dimensionSimilarity, rankPlanetMatches, earthFactorGrades, SUBSTRATE_AFFINITY, VOLATILE_AFFINITY, SIMILARITY_DIMENSIONS } from '../js/science/similarity.js';
 import { geometricSolarFraction, effectiveSolar, marsPressureKPa } from '../js/science/solar.js';
 import { DemGrid, sampleRamp } from '../js/science/terrain.js';
 import { summarizeClimate, summarizePowerClimate, terrainFromElevations, toaDailyMJ, terrainSamplePoints } from '../js/data/earth-climate.js';
@@ -165,6 +165,45 @@ test('Earth site with identical substrate scores above a mismatched substrate wh
   const saltDim = far.dimensions.find((d) => d.id === 'substrate');
   assert.equal(clayDim.similarity, 1);
   assert.ok(saltDim.similarity < 0.3);
+});
+
+test('Earth-to-planet ranking is the inverse match and keeps planetary identity', () => {
+  const earth = earthCandidate({ substrateGroup: 'clay', volatileGroup: 'hydrated_minerals' });
+  const planet = (id, substrateGroup) => ({
+    body: 'mars',
+    terrain: TERRAIN,
+    site: {
+      id,
+      name: id,
+      body: 'mars',
+      substrateGroup,
+      volatileGroup: 'hydrated_minerals',
+      tempMeanK: { value: 290 },
+      tempAmpK: { value: 15 },
+      solarFraction: { value: 0.62 },
+    },
+  });
+  const ranked = rankPlanetMatches(earth, [planet('mismatch', 'salt'), planet('match', 'clay')]);
+  assert.equal(ranked[0].planetSite.id, 'match');
+  assert.equal(ranked[0].planetBody, 'mars');
+  assert.equal(ranked[1].planetSite.id, 'mismatch');
+  assert.ok(ranked[0].score > ranked[1].score);
+});
+
+test('eight Earth factor grades use available dimensions and leave unsupported factors unassessed', () => {
+  const site = MOON_SITES.find((s) => s.id === 'apollo-11');
+  const compare = comparePair({ site, terrain: TERRAIN, body: 'moon' }, earthCandidate());
+  const factors = earthFactorGrades(compare);
+  assert.equal(factors.length, 8);
+  assert.ok(factors.find((f) => f.id === 'materials').available);
+  assert.ok(factors.find((f) => f.id === 'terrain').available);
+  assert.ok(factors.find((f) => f.id === 'environment').available);
+  assert.ok(factors.find((f) => f.id === 'volatiles').available);
+  assert.equal(factors.find((f) => f.id === 'processes').status, 'unassessed');
+  assert.equal(factors.find((f) => f.id === 'biology').status, 'unassessed');
+  assert.equal(factors.find((f) => f.id === 'subsurface').status, 'unassessed');
+  assert.equal(factors.find((f) => f.id === 'operations').status, 'partial');
+  assert.ok(factors.filter((f) => f.available).every((f) => f.grade && f.similarity !== null));
 });
 
 test('DEM bilinear sampling and Horn slope behave on a synthetic grid', () => {

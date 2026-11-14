@@ -244,6 +244,27 @@ They are possibilities supported by the match, not claims that a site has been u
 
 The pool deliberately mixes established analog sites with less-studied candidates (e.g. Waw an Namus, Emi Koussi, Harrat Khaybar, Salar de Arizaro, Qaidam, Mistastin). A high grade for such a site is labelled “less-studied data-driven candidate”; the ranking is computed from measured characteristics, not from fame.
 
+### 4.7 Reverse matching and Earth’s eight-factor profile
+
+For an Earth candidate, RADIUM computes the same comparison against all 31 curated planetary sites (16 Moon, 15 Mars), ranks the results and reports the best match. That best match sets the **overall analog grade** and supplies the factor profile. “Mimics” therefore means “closest measured analog among the curated planetary sites”, not a claim of geological identity.
+
+The eight requested categories are built from the comparable similarity dimensions:
+
+| Earth factor | Underlying dimensions | Status |
+| --- | --- | --- |
+| Geology, mineralogy & surface materials | surface material affinity | assessed, categorical only |
+| Terrain, elevation, slope, roughness & craters | slope + roughness | assessed; elevation offset and crater populations not scored |
+| Temperature, illumination & environmental extremes | mean temperature + diurnal amplitude + solar fraction | assessed |
+| Water, ice, permafrost & potential resources | volatile-setting affinity | assessed, not water quantity |
+| Dust, wind, erosion & atmospheric / surface processes | none | **unassessed** |
+| Biology, extremophiles, habitability & biosignatures | none | **unassessed** |
+| Caves, lava tubes, underground environments & subsurface | none | **unassessed** |
+| Landing, mobility, navigation, robotics, human exploration & construction | slope + roughness | **partial**, terrain only |
+
+A group grade is the effective-weight-weighted mean of its available dimension similarities, converted with the same letter bands. Groups without comparable data are shown as “not assessed” and are not replaced with an estimate. The operations group is explicitly partial because gravity, pressure, radiation, dust and site infrastructure are excluded. The overall grade remains the full seven-dimension similarity score; no extra weighting is applied for the eight display groups.
+
+The Moon/Mars analog interface reports only the **top five** Earth candidates. The Earth candidate list reports each site’s best planetary match and overall grade after the live pool has been measured.
+
 ---
 
 ## 5. Terrain computation
@@ -287,7 +308,7 @@ RADIUM therefore reports the published polar **illumination-time** fraction sepa
 
 ## 7. Validation
 
-Automated tests (`npm test`, 22 tests):
+Automated tests (`npm test`, 24 tests):
 
 - Grade bands, boundaries, null handling.
 - Profile weights sum to 1.
@@ -295,6 +316,8 @@ Automated tests (`npm test`, 22 tests):
 - Hard constraint → grade F with explanation.
 - Priority multipliers change effective weights; shares remain normalised.
 - Similarity bounds, symmetry, identical-value identity, missing-dimension renormalisation, incomparable list.
+- Inverse Earth-to-planet ranking and planetary identity preservation.
+- Eight-factor grouping, including explicitly unassessed and partial factors.
 - Affinity matrices symmetric and within [0,1].
 - DEM bilinear sampling, Horn slope against an analytic gradient, roughness on flat/sloped synthetic grids.
 - NASA POWER summariser on synthetic monthly normals (annual mean, monthly-mean diurnal range, precipitation, solar, Hargreaves ET₀, missing `-999` handling).

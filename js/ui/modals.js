@@ -102,6 +102,7 @@ export const MODAL_CONTENT = {
       <pre class="formula">A = Σ (vᵢ · dᵢ) / Σ vᵢ</pre>
       <p>Each dimension is compared with a documented scale or a categorical affinity. Missing dimensions are dropped and weights renormalised. Confidence = coverage × mean evidence quality. The grade describes closeness of measured characteristics, not physical equivalence.</p>
       <div class="table-scroll"><table><thead><tr><th>Dimension</th><th>Weight</th><th>Unit</th><th>Comparison and caveat</th></tr></thead><tbody>${dimensionTable()}</tbody></table></div>
+      <p>The Moon/Mars view reports the <strong>top five</strong> Earth analogs. The inverse view matches each Earth site against all 31 curated planetary sites; that best match sets its overall analog grade and its eight-factor profile. Dust, biology and subsurface factors have no comparable datasets and are explicitly shown as unassessed rather than inferred. The operations row is terrain-only; gravity, pressure, radiation and infrastructure are excluded.</p>
 
       <h3>4 · Categorical affinity</h3>
       <p>Material and volatile classes use fixed affinities rather than pretending that, for example, salt and basalt are numerically close. Symmetric matrices are shown in full.</p>
@@ -119,7 +120,7 @@ export const MODAL_CONTENT = {
       </ul>
 
       <h3>7 · Scope and honesty</h3>
-      <p>RADIUM v1 implements a scientifically grounded vertical slice: 16 lunar sites, 15 Mars sites, 34 terrestrial candidates, live Earth measurements, explainable grades and a functioning Earth Twin Mode. It is not a global survey of every possible analog, nor a landing-certification tool. See “Data sources” for provenance and limitations of each product.</p>
+      <p>RADIUM v1 implements a scientifically grounded vertical slice: 16 lunar sites, 15 Mars sites, 34 terrestrial candidates, live Earth measurements, top-five Earth Twin rankings, reverse Earth-to-planet matching, eight-factor Earth profiles, explainable grades and a functioning Earth Twin Mode. It is not a global survey of every possible analog, nor a landing-certification tool. See “Data sources” for provenance and limitations of each product.</p>
       <p class="caveat">${MISSION_CAVEAT}</p>
     </div>`,
 

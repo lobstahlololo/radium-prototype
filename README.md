@@ -21,7 +21,7 @@ node server.mjs 8080
 No install or build step is required. An internet connection is needed for NASA imagery tiles and Earth measurements (NASA POWER, with ERA5/Open-Meteo fallback). CesiumJS, MapLibre GL and fonts are loaded from public CDNs.
 
 ```bash
-npm test           # 22 unit tests (grading, scoring, similarity, terrain, catalogs)
+npm test           # 24 unit tests (grading, scoring, similarity, terrain, catalogs)
 npm run data       # re-download and rebuild the bundled DEMs from NASA PDS
 ```
 
@@ -42,7 +42,8 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | Mission profiles: lunar base, Mars robotic landing, Mars human exploration | Working |
 | Adjustable priorities with live re-ranking and explanation | Working |
 | Explainable A–F suitability grades with coverage/confidence and constraints | Working |
-| Earth Twin Mode: 34 terrestrial candidates, live NASA POWER/DEM measurements, dimension grades | Working |
+| Earth Twin Mode: live NASA POWER/DEM measurements, top-five terrestrial analogs, dimension grades | Working |
+| Earth dossier: overall best-planet match, eight-factor analog profile, explicit data gaps | Working |
 | Side-by-side comparison, strong/weak matches, applications, physical mismatches | Working |
 | Dataset registry with provenance, resolution, licensing and limitations | Working |
 | Context imagery at the selected coordinate | Working (NASA tiles drawn client-side) |
@@ -65,6 +66,7 @@ RADIUM keeps two questions strictly apart:
    `S = Σ(wᵢ·sᵢ) / Σwᵢ`, with weights normalised over available factors. Hard screens can cap a grade at F. Coverage and confidence are reported; a grade is withheld below 50% data coverage.
 2. **Earth analog similarity** — separate dimension-by-dimension comparison:
    `A = Σ(vᵢ·dᵢ) / Σvᵢ`, using documented scales for thermal, terrain and solar dimensions and fixed affinity matrices for material/volatile classes. Gravity, pressure, radiation and dust physics are excluded and displayed as mismatches.
+   The inverse direction matches each Earth candidate against all 31 curated Moon/Mars sites, selects its best overall analog match, and groups the same comparable dimensions into the eight-factor profile. Dust, biology and subsurface factors have no comparable datasets and remain explicitly unassessed.
 
 Grades: A ≥ 80, B ≥ 65, C ≥ 50, D ≥ 35, F < 35. These are RADIUM-defined exploratory assessments, **not NASA certification**.
 
