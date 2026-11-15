@@ -43,11 +43,11 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | Adjustable priorities with live re-ranking and explanation | Working |
 | Explainable A–F suitability grades with coverage/confidence and constraints | Working |
 | Grade-coloured factor bars for every mission factor, plus luminosity, thermal cycling and surface trafficability | Working |
-| Head-to-head: retain a Moon/Mars site, then click any Earth pin for factor-by-factor comparison | Working |
+| Earth Twin Mode: rank the top five Earth analogs for a selected Moon/Mars site, or compare any clicked Earth coordinate factor by factor | Working |
 | Statistical shortlist of less-studied Earth candidates for the selected planetary site | Working (curated pool only) |
 | 0–100 Earth similarity estimates on every pin, candidate row and comparison hero | Working |
 | Top-five-only Earth-analog matrix in Twin Mode, plus top-five Moon/Mars comparison for any Earth site | Working |
-| Earth Twin Mode: live NASA POWER/DEM measurements, top-five terrestrial analogs, dimension grades | Working |
+| Earth Twin Mode: live NASA POWER/DEM measurements, top-five terrestrial analogs, arbitrary clicked Earth coordinates, dimension grades | Working |
 | Earth dossier: overall best-planet match, eight-factor analog profile, brightness/albedo factors, explicit data gaps | Working |
 | Experimental score for any clicked Earth coordinate from live climate, multi-scale terrain, SoilGrids and Smithsonian volcano context | Working |
 | Side-by-side comparison, strong/weak matches, applications, physical mismatches | Working |
