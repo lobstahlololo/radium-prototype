@@ -1,9 +1,9 @@
 {
   "name": "radium",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "RADIUM — interactive planetary exploration and terrestrial analog discovery for the NASA Space Apps Challenge.",
+  "description": "RADIUM — an independent planetary analog intelligence console for Moon and Mars site analysis and terrestrial analog discovery.",
   "scripts": {
     "start": "node server.mjs",
     "dev": "node server.mjs",

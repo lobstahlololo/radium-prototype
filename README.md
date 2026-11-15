@@ -1,12 +1,16 @@
 # RADIUM
 
-**Planetary exploration and terrestrial analog discovery** — a NASA Space Apps Challenge project.
+**Planetary analog intelligence** — an independent mission-science console for Moon, Mars and Earth analog analysis. Built for the NASA Space Apps Challenge.
 
 RADIUM lets you explore the Moon and Mars on interactive 3D globes, evaluate real sites against configurable mission priorities, get explainable letter grades, and activate **Earth Twin Mode** to find terrestrial environments that share measurable characteristics with a planetary site.
 
 It is built as a working scientific application, not a mockup. Elevation, slope and roughness are computed live from bundled NASA DEMs; Earth climate comes from live NASA POWER climatology (ERA5 fallback); imagery is streamed from NASA's Solar System Treks and NASA GIBS. Where data does not exist, RADIUM says so, reduces coverage/confidence, and refuses to invent a value.
 
-![No screenshot is bundled; run the app locally to explore it.]
+![RADIUM mission console showing the lunar globe, mission telemetry, ranked sites and an Apollo 11 decision brief.](docs/radium-desktop.png)
+
+<sub>Desktop mission console. The responsive mobile layout is captured in [docs/radium-mobile.png](docs/radium-mobile.png).</sub>
+
+> RADIUM is an independent research tool. It is not an official NASA product, and its grades are not NASA certification, landing approval, or a substitute for mission-specific engineering analysis.
 
 ---
 
@@ -21,7 +25,7 @@ node server.mjs 8080
 No install or build step is required. An internet connection is needed for NASA imagery tiles and Earth measurements (NASA POWER, with ERA5/Open-Meteo fallback). CesiumJS, MapLibre GL and fonts are loaded from public CDNs.
 
 ```bash
-npm test           # 27 unit tests (grading, scoring, similarity, terrain, catalogs)
+npm test           # 31 unit and catalog-integrity tests
 npm run data       # re-download and rebuild the bundled DEMs from NASA PDS
 ```
 
@@ -33,6 +37,11 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 
 | Area | Status |
 | --- | --- |
+| Mission operations console with live DEM/cache/selection telemetry and UTC | Working |
+| Instant candidate search across sites, regions, countries and material classes | Working |
+| Shareable analysis links restoring body, mission, site and Twin pair | Working |
+| Decision-support cards for primary strength and limiting factor | Working |
+| Responsive analysis drawer with keyboard and screen-reader support | Working |
 | 3D Moon globe with LRO LROC WAC imagery | Working (CesiumJS) |
 | 3D Mars globe with Viking MDIM21 imagery | Working (CesiumJS) |
 | 2D Earth map with NASA GIBS Blue Marble, ASTER topography, MODIS albedo/LST and MERRA-2 AOD layers | Working (MapLibre) |
@@ -53,6 +62,15 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | Side-by-side comparison, strong/weak matches, applications, physical mismatches | Working |
 | Dataset registry with provenance, resolution, licensing and limitations | Working |
 | Context imagery at the selected coordinate | Working (NASA tiles drawn client-side) |
+
+### Console accessibility and resilience
+
+- A persistent mission strip reports DEM readiness, Earth-profile cache state, current selection and UTC without stealing focus.
+- Candidate rankings filter instantly by site, region, country or material class; `/` focuses search and `Escape` clears it.
+- Analysis links restore the selected body, mission and site, including curated Earth analogs and Twin pairs. Arbitrary clicked coordinates are encoded by latitude/longitude.
+- At medium widths the inspector becomes an explicit drawer with a scrim; at narrow widths it stacks below the map. Desktop remains a three-pane console.
+- Dialogs trap focus, restore focus on close, and support `Escape`. A skip link, visible focus rings and reduced-motion styles are included.
+- Data failures remain visible: unavailable imagery appears on the map, Earth climate failures reduce similarity coverage, and no placeholder observation is invented.
 
 ### Explicitly not implemented
 
@@ -119,7 +137,7 @@ data/
   dem-meta.json            Grid metadata, source checksums, percentiles
 
 tools/prepare-data.mjs     Reproducible PDS ingestion
-tests/                     27 unit + catalog-integrity tests
+tests/                     31 unit + catalog-integrity tests
 docs/                      Methodology and data-source documentation
 ```
 
@@ -175,6 +193,26 @@ No values are altered other than byte order. Percentiles are used only for colou
 - Catalog integrity: unique ids, valid coordinates/groups, provenance references, polar illumination overrides, no hardcoded Earth climate.
 
 Run `node server.mjs` and open the app to exercise live layers. Verification notes for this build are in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md#validation).
+
+---
+
+## Operational readiness
+
+This build is presented as a research console, not as a certified operational system.
+
+| Area | Posture in this build |
+| --- | --- |
+| Scientific claims | Every grade is labelled RADIUM-defined; missing data is explicit; incomparable physics are excluded. |
+| Provenance | Dataset registry records mission, resolution, access, licensing, processing and limitations. |
+| Failure behavior | Live-service failures surface in-map or in-context and reduce coverage instead of creating estimates. |
+| Reproducibility | LOLA/MOLA DEMs are bundled with hashes and a repeatable ingestion tool; scoring engines are unit-tested. |
+| Shareability | Analysis state is encoded in the URL and restores on a fresh load. |
+| Accessibility | Keyboard navigation, focus management, search shortcut, live status regions and reduced-motion support. |
+| Responsive use | Three-pane desktop console, explicit medium-width drawer, stacked mobile analysis. |
+| Deployment | Static, dependency-free server; no build step; can be hosted on any static host. |
+| Independence | No NASA endorsement is claimed or implied; the interface states that RADIUM is independent. |
+
+Known gaps are listed in [Scope](#explicitly-not-implemented) and in the in-app Scope panel. Certified landing-hazard analysis, global per-pixel planetary temperature/ice rasters, and radiation/atmosphere simulation are deliberately out of scope.
 
 ---
 

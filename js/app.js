@@ -64,6 +64,7 @@ const state = {
   twin: { active: false, planetSiteId: null, rankings: [], allRankings: [], measuredCount: 0, selectedAnalogId: null, compare: null, custom: null },
   lastRecalc: null,
   loading: null,
+  search: '',
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -71,6 +72,9 @@ const app = $('#app');
 const inspector = $('#inspector');
 const candidatesBody = $('#candidates-body');
 const toastRegion = $('#toast-region');
+const inspectorRail = $('#inspector-rail');
+const analysisToggle = $('#analysis-toggle');
+const railScrim = $('#rail-scrim');
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -220,6 +224,21 @@ function toast(message, kind = 'info', ms = 6000) {
   setTimeout(() => el.remove(), ms);
 }
 
+function setInspectorOpen(open) {
+  inspectorRail?.classList.toggle('is-open', open);
+  analysisToggle?.setAttribute('aria-expanded', String(open));
+  if (railScrim) railScrim.hidden = !open;
+}
+
+function openInspector() {
+  setInspectorOpen(true);
+  renderMissionStrip();
+}
+
+function closeInspector() {
+  setInspectorOpen(false);
+}
+
 function setDemStatus(text, ok = true) {
   const el = $('#dem-status');
   el.textContent = text;
@@ -229,15 +248,124 @@ function setDemStatus(text, ok = true) {
 function updateEarthStatus() {
   const el = $('#earth-status');
   if (state.earthPoolState === 'loading' && state.earthPoolProgress) {
-    el.textContent = `Earth climate ${state.earthPoolProgress.done}/${state.earthPoolProgress.total}`;
+    el.textContent = `Profiles ${state.earthPoolProgress.done}/${state.earthPoolProgress.total}`;
   } else if (state.earthPoolState === 'ready') {
-    el.textContent = `Earth pool · ${state.earthPool.length} sites`;
+    el.textContent = `${state.earthPool.length} sites ready`;
   } else if (state.earthPoolState === 'error') {
-    el.textContent = 'Earth climate unavailable';
+    el.textContent = 'Unavailable';
   } else {
-    el.textContent = 'Earth data idle';
+    el.textContent = 'On demand';
   }
   el.classList.toggle('pill-warn', state.earthPoolState === 'error');
+}
+
+function updateSelectionStatus() {
+  const el = $('#selection-status');
+  if (!el) return;
+  const sel = state.selection;
+  let text = 'No site selected';
+  if (sel?.kind === 'site') {
+    const site = (BODY_SITES[state.body] || []).find((s) => s.id === sel.siteId);
+    text = site ? site.name : 'Site selected';
+  } else if (sel?.kind === 'twin') {
+    const planet = selectedAssessment();
+    const earth = state.twin.compare?.earthName || 'Earth analog';
+    text = planet ? `${planet.site.name} ↔ ${earth}` : 'Twin comparison';
+  } else if (sel?.kind === 'earth') {
+    text = sel.profile?.name || 'Earth site';
+  } else if (sel?.kind === 'earth-loading') {
+    text = 'Measuring Earth coordinate';
+  } else if (sel?.kind === 'earth-error') {
+    text = 'Earth measurement unavailable';
+  } else if (sel?.kind === 'planet-point') {
+    text = 'Terrain-only coordinate';
+  } else if (state.twin.active) {
+    text = 'Awaiting Earth analog';
+  }
+  el.textContent = text;
+  el.title = text;
+}
+
+function renderMissionStrip() {
+  const objective = $('#mission-objective');
+  if (!objective) return;
+  if (state.twin.active) {
+    objective.textContent = `${BODIES[state.body].label} ↔ Earth · direct analog analysis`;
+  } else if (state.body === 'earth') {
+    objective.textContent = `Terrestrial analog screening · ${EARTH_ANALOGS.length} curated sites`;
+  } else {
+    const profile = MISSION_PROFILES[state.missionId];
+    objective.textContent = `${profile?.label || `${BODIES[state.body].label} screening`} · ${(BODY_SITES[state.body] || []).length} curated sites`;
+  }
+  updateSelectionStatus();
+}
+
+function startClock() {
+  const clock = $('#utc-clock');
+  if (!clock) return;
+  const tick = () => { clock.textContent = new Date().toISOString().slice(11, 19); };
+  tick();
+  setInterval(tick, 1000);
+}
+
+function readUrlState() {
+  const raw = location.hash.replace(/^#/, '');
+  if (!raw) return {};
+  const params = new URLSearchParams(raw);
+  const body = ['moon', 'mars', 'earth'].includes(params.get('body')) ? params.get('body') : null;
+  const lat = params.has('lat') ? Number(params.get('lat')) : null;
+  const lon = params.has('lon') ? Number(params.get('lon')) : null;
+  return {
+    body,
+    mission: params.get('mission'),
+    site: params.get('site'),
+    earth: params.get('earth'),
+    lat: Number.isFinite(lat) && lat >= -90 && lat <= 90 ? lat : null,
+    lon: Number.isFinite(lon) && lon >= -180 && lon <= 180 ? lon : null,
+    twin: params.get('view') === 'twin',
+  };
+}
+
+function syncUrlState() {
+  const params = new URLSearchParams();
+  params.set('body', state.body);
+  if (state.twin.active) params.set('view', 'twin');
+  if (state.missionId && state.body !== 'earth') params.set('mission', state.missionId);
+  const sel = state.selection;
+  if (sel?.kind === 'site') params.set('site', sel.siteId);
+  if (state.twin.active && state.twin.planetSiteId) params.set('site', state.twin.planetSiteId);
+  if (sel?.kind === 'earth' && !sel.custom) params.set('earth', sel.profile.id);
+  if (sel?.kind === 'twin' && sel.analogId && sel.analogId !== 'custom-earth-point') params.set('earth', sel.analogId);
+  const custom = sel?.kind === 'earth' && sel.custom
+    ? sel.profile
+    : sel?.kind === 'twin' && sel.analogId === 'custom-earth-point'
+      ? state.twin.custom
+      : null;
+  if (custom) {
+    params.set('lat', Number(custom.lat).toFixed(3));
+    params.set('lon', Number(custom.lon).toFixed(3));
+  }
+  if (sel?.kind === 'planet-point') {
+    params.set('lat', Number(sel.lat).toFixed(3));
+    params.set('lon', Number(sel.lon).toFixed(3));
+  }
+  try {
+    history.replaceState(null, '', `${location.pathname}${location.search}#${params.toString()}`);
+  } catch {
+    // File URLs and sandboxed previews can reject history updates; the app remains functional.
+  }
+  return location.href;
+}
+
+function shareAnalysis() {
+  const url = syncUrlState();
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url)
+      .then(() => toast('Analysis link copied. It restores this body, mission and selection.', 'ok', 4000))
+      .catch(() => toast(`Copy this analysis link: ${url}`, 'warn', 12000));
+  } else {
+    toast(`Copy this analysis link: ${url}`, 'info', 12000);
+  }
 }
 
 function setLoading(text) {
@@ -509,11 +637,14 @@ async function selectEarthAnalog(id) {
     renderCandidates();
     renderInspector();
     updateEarthMarkers();
+    openInspector();
+    syncUrlState();
     state.earthMap?.flyTo(analog.lat, analog.lon, 4.5);
     return;
   }
   state.selection = { kind: 'earth-loading', lat: analog.lat, lon: analog.lon, name: analog.name };
   renderInspector();
+  openInspector();
   state.earthMap?.flyTo(analog.lat, analog.lon, 4.5);
   try {
     const profile = await buildEarthProfile(analog);
@@ -530,6 +661,8 @@ async function selectEarthAnalog(id) {
   renderCandidates();
   renderInspector();
   updateEarthMarkers();
+  openInspector();
+  syncUrlState();
 }
 
 function applyCustomEarthProfile(profile) {
@@ -543,12 +676,16 @@ function applyCustomEarthProfile(profile) {
     renderCandidates();
     renderInspector();
     updateEarthMarkers();
+    openInspector();
+    syncUrlState();
     return;
   }
   state.selection = { kind: 'earth', profile, custom: true };
   queueEarthMatch(profile);
   renderInspector();
   updateEarthMarkers();
+  openInspector();
+  syncUrlState();
 }
 
 async function onEarthPick({ lat, lon }) {
@@ -563,6 +700,7 @@ async function onEarthPick({ lat, lon }) {
     twin: state.twin.active,
   };
   renderInspector();
+  openInspector();
   try {
     const profile = await buildEarthProfile({
       id: 'custom-earth-point',
@@ -609,6 +747,8 @@ function selectSite(id) {
   renderInspector();
   updateGlobeSites();
   applyPlanetLayer();
+  openInspector();
+  syncUrlState();
   if (state.globe && !state.twin.active) state.globe.flyTo(site.lat, site.lon);
 }
 
@@ -630,6 +770,8 @@ function onPlanetPick({ lat, lon }) {
   renderInspector();
   renderCandidates();
   updateGlobeSites();
+  openInspector();
+  syncUrlState();
 }
 
 function setCoordReadout(lat, lon, label) {
@@ -693,6 +835,7 @@ async function activateTwin() {
     renderAll();
     state.earthMap?.flyTo(EARTH_ANALOGS.find((a) => a.id === state.twin.selectedAnalogId)?.lat || 10, EARTH_ANALOGS.find((a) => a.id === state.twin.selectedAnalogId)?.lon || 0, 2.2);
   }
+  syncUrlState();
 }
 
 function deactivateTwin() {
@@ -713,6 +856,7 @@ function deactivateTwin() {
   }
   resizeMaps();
   renderAll();
+  syncUrlState();
 }
 
 function ensureEarthPool() {
@@ -771,6 +915,7 @@ function renderAll() {
   renderCandidates();
   renderStageChrome();
   renderLegend();
+  renderMissionStrip();
   renderInspector();
   updateGlobeSites();
   updateEarthMarkers();
@@ -868,15 +1013,30 @@ function renderPriorities() {
     <p class="fine">Weights renormalise automatically. Multiplying a priority by 0 removes it; all weights are shown as shares of the available total.</p>`;
 }
 
+function setCandidateCount(shown, total, label) {
+  const el = $('#candidate-count');
+  if (!el) return;
+  el.textContent = state.search.trim() ? `${shown}/${total}` : `${total} ${label}`;
+}
+
+function noSearchResults(kind) {
+  return `<div class="no-results"><strong>No matching ${esc(kind)}</strong><p>Try a site, region, country or material class.</p><button class="ghost-btn" type="button" data-clear-search>Clear filter</button></div>`;
+}
+
 function renderCandidates() {
   const title = $('#candidates-title');
   const kicker = $('#candidates-kicker');
   const bodyEl = candidatesBody;
+  const searchInput = $('#candidate-search');
+  if (searchInput && searchInput.value !== state.search) searchInput.value = state.search;
+  const query = state.search.trim().toLowerCase();
+  const matches = (...values) => !query || values.some((value) => String(value ?? '').toLowerCase().includes(query));
 
   if (state.twin.active) {
     title.textContent = 'Top 5 Earth analogs';
     kicker.textContent = state.earthPoolState === 'ready' ? `of ${state.twin.measuredCount} measured` : 'live measurements';
     if (state.earthPoolState === 'loading') {
+      setCandidateCount(0, 0, 'live');
       const p = state.earthPoolProgress;
       bodyEl.innerHTML = `
         <div class="loading-block"><span class="spinner"></span>
@@ -887,25 +1047,33 @@ function renderCandidates() {
       return;
     }
     if (state.earthPoolState === 'error') {
+      setCandidateCount(0, 0, 'offline');
       bodyEl.innerHTML = `<div class="empty-state"><strong>Earth measurements unavailable.</strong><p>The climate/elevation services could not be reached. Similarity cannot be computed without Earth data, and RADIUM will not substitute placeholder values.</p><button class="solid-btn" data-retry-pool type="button">Retry</button></div>`;
       return;
     }
     if (!state.twin.rankings.length) {
+      setCandidateCount(0, 0, 'ranked');
       bodyEl.innerHTML = `<div class="empty-state"><p>Select a planetary site to rank analogs.</p></div>`;
       return;
     }
-    bodyEl.innerHTML = state.twin.rankings
-      .map((r, i) => {
+    const allRows = state.twin.rankings.map((row, index) => ({ row, rank: index + 1 }));
+    const rows = allRows.filter(({ row }) => {
+      const analog = EARTH_ANALOGS.find((a) => a.id === row.earthId);
+      return matches(row.earthName, analog?.country, analog?.landform, row.strong?.[0]?.label);
+    });
+    setCandidateCount(rows.length, allRows.length, 'ranked');
+    bodyEl.innerHTML = rows.length ? rows
+      .map(({ row: r, rank }) => {
         const analog = EARTH_ANALOGS.find((a) => a.id === r.earthId);
         const top = r.strong[0];
         return `<button type="button" class="candidate-row ${r.earthId === state.twin.selectedAnalogId ? 'is-selected' : ''}" data-analog="${r.earthId}">
-          <span class="rank">${String(i + 1).padStart(2, '0')}</span>
+          <span class="rank">${String(rank).padStart(2, '0')}</span>
           <span class="cand-main"><strong>${esc(r.earthName)}</strong><em>${esc(analog?.country || '')}${analog && !analog.established ? ' · less-studied candidate' : ''}</em></span>
           <span class="cand-strength">${Math.round(r.score)}/100 · ${top ? `${esc(top.label)} ${pct(top.similarity)}` : 'limited overlap'}</span>
           ${gradeChip(r.grade)}
         </button>`;
       })
-      .join('');
+      .join('') : noSearchResults('Earth analogs');
     return;
   }
 
@@ -917,8 +1085,11 @@ function renderCandidates() {
         : state.earthPoolState === 'loading'
           ? 'live climate loading…'
           : 'best of 31 planetary sites';
-    bodyEl.innerHTML = EARTH_ANALOGS.map(
-      (a, i) => {
+    const allRows = EARTH_ANALOGS.map((analog, index) => ({ analog, rank: index + 1 }));
+    const rows = allRows.filter(({ analog }) => matches(analog.name, analog.country, analog.substrateGroup, analog.landform));
+    setCandidateCount(rows.length, allRows.length, 'sites');
+    bodyEl.innerHTML = rows.length ? rows.map(
+      ({ analog: a, rank }) => {
         const best = state.earthMatches[a.id]?.[0];
         const strength = best
           ? `${Math.round(best.score)}/100 · mimics ${best.planetSite.name}`
@@ -928,29 +1099,30 @@ function renderCandidates() {
               ? 'Match unavailable'
               : 'Open to rate';
         return `<button type="button" class="candidate-row ${state.selection?.kind === 'earth' && state.selection.profile?.id === a.id ? 'is-selected' : ''}" data-analog="${a.id}">
-          <span class="rank">${String(i + 1).padStart(2, '0')}</span>
+          <span class="rank">${String(rank).padStart(2, '0')}</span>
           <span class="cand-main"><strong>${esc(a.name)}</strong><em>${esc(a.country)} · ${humanize(a.substrateGroup)}</em></span>
           <span class="cand-strength">${esc(strength)}</span>
           ${gradeChip(best?.grade ?? UNRATED)}
         </button>`;
       },
-    ).join('');
+    ).join('') : noSearchResults('Earth sites');
     return;
   }
 
   title.textContent = 'Mission suitability';
-  kicker.textContent = `${MISSION_PROFILES[state.missionId]?.short || ''} · ${getAssessed().length} sites`;
-  bodyEl.innerHTML = sortedAssessments()
-    .map((r, i) => {
-      const strength = r.result?.strengths?.[0];
-      return `<button type="button" class="candidate-row ${r.site.id === state.selection?.siteId ? 'is-selected' : ''}" data-site="${r.site.id}">
-        <span class="rank">${String(i + 1).padStart(2, '0')}</span>
-        <span class="cand-main"><strong>${esc(r.site.name)}</strong><em>${esc(r.site.region)}</em></span>
-        <span class="cand-strength">${strength ? `${esc(strength.label)} ${Math.round(strength.score)}` : 'Coverage limited'}</span>
-        ${gradeChip(r.grade)}
-      </button>`;
-    })
-    .join('');
+  const allRows = sortedAssessments().map((row, index) => ({ row, rank: index + 1 }));
+  kicker.textContent = `${MISSION_PROFILES[state.missionId]?.short || ''} · ${allRows.length} sites`;
+  const rows = allRows.filter(({ row }) => matches(row.site.name, row.site.region, row.result?.strengths?.[0]?.label, row.site.summary));
+  setCandidateCount(rows.length, allRows.length, 'sites');
+  bodyEl.innerHTML = rows.length ? rows.map(({ row: r, rank }) => {
+    const strength = r.result?.strengths?.[0];
+    return `<button type="button" class="candidate-row ${r.site.id === state.selection?.siteId ? 'is-selected' : ''}" data-site="${r.site.id}">
+      <span class="rank">${String(rank).padStart(2, '0')}</span>
+      <span class="cand-main"><strong>${esc(r.site.name)}</strong><em>${esc(r.site.region)}</em></span>
+      <span class="cand-strength">${strength ? `${esc(strength.label)} ${Math.round(strength.score)}` : 'Coverage limited'}</span>
+      ${gradeChip(r.grade)}
+    </button>`;
+  }).join('') : noSearchResults('planetary sites');
 }
 
 function renderStageChrome() {
@@ -1160,6 +1332,25 @@ function renderFactorBars(factors) {
     .join('')}</div>`;
 }
 
+function renderDecisionBrief(result) {
+  if (!result) return '';
+  const strength = result.strengths?.[0];
+  const limiting = result.weakest?.[0];
+  if (!strength && !limiting) return '';
+  return `<div class="decision-strip" aria-label="Decision-support summary">
+    ${strength ? `<div class="decision-card">
+      <span class="decision-label">Primary strength</span>
+      <strong title="${esc(strength.label)}: ${esc(strength.detail)} — ${Math.round(strength.score)}/100">${esc(strength.label)}</strong>
+      <em>${Math.round(strength.score)}/100 · ${pct(strength.effectiveWeight)} of weight</em>
+    </div>` : ''}
+    ${limiting ? `<div class="decision-card is-watch">
+      <span class="decision-label">Limiting factor</span>
+      <strong title="${esc(limiting.label)}: ${esc(limiting.detail)} — ${Math.round(limiting.score)}/100">${esc(limiting.label)}</strong>
+      <em>${Math.round(limiting.score)}/100 · ${pct(limiting.effectiveWeight)} of weight</em>
+    </div>` : ''}
+  </div>`;
+}
+
 function renderDiscoveryBlock(candidates) {
   if (!candidates.length) return '';
   return `<section class="panel-section">
@@ -1265,9 +1456,11 @@ function renderSiteInspector() {
     ${result?.violations?.length ? `<div class="alert alert-fail"><strong>Hard screen violated.</strong> ${esc(result.violations[0].label)} Measured value ${round(result.violations[0].value, 1)}${result.violations[0].factor === 'slope' ? '°' : ''}.</div>` : ''}
     ${result?.ratingNote ? `<p class="fine">${esc(result.ratingNote)}</p>` : ''}
     ${state.lastRecalc ? `<div class="recalc-note">${esc(state.lastRecalc)}</div>` : ''}
+    ${renderDecisionBrief(result)}
     <div class="action-row">
       <button type="button" class="solid-btn" data-action="twin">${state.twin.active ? 'Recompute Earth analogs' : 'Find Earth analogs'}</button>
       <button type="button" class="ghost-btn" data-action="fly">Center map</button>
+      <button type="button" class="ghost-btn" data-action="share">Copy analysis link</button>
     </div>
     <p class="fine compare-armed"><strong>Earth comparison:</strong> open Earth to see every site scored against its closest Moon or Mars match, or use Earth Twin Mode for a direct head-to-head with ${esc(site.name)}.</p>
     <p class="summary">${esc(site.summary)}</p>
@@ -1345,6 +1538,7 @@ function renderPlanetPointInspector() {
     </dl>` : '<p class="na">Data unavailable at this coordinate.</p>'}
     ${sel.body === 'mars' && terrain ? `<p class="fine">Mean atmospheric pressure ≈ <b>${round(marsPressureKPa(terrain.elevationM), 2)} kPa</b> from a barometric approximation (scale height 11.1 km), not a measured pressure.</p>` : ''}
     ${near ? `<div class="nearest-block"><p><strong>Nearest curated site:</strong> ${esc(near.site.name)} · ${Math.round(near.km)} km away</p><button type="button" class="solid-btn" data-action="nearest" data-site="${near.site.id}">Assess ${esc(near.site.name)}</button></div>` : ''}
+    <div class="action-row"><button type="button" class="ghost-btn" data-action="share">Copy analysis link</button></div>
     <p class="caveat">Arbitrary-coordinate measurements are limited to the 0.25°/px DEM. Landing-hazard analysis needs metre-scale data that RADIUM does not bundle.</p>`;
 }
 
@@ -1513,6 +1707,7 @@ function renderEarthInspector() {
       <p class="grade-sub">Mimics <strong>${esc(best.planetSite.name)}</strong> · ${esc(BODIES[best.planetBody]?.label || best.planetBody)}${experimental ? ' · clicked coordinate' : ''}</p>
       <div class="chip-row"><span class="pill">Score ${Math.round(hero.score)}/100</span><span class="pill">Coverage ${pct(hero.coverage)}</span><span class="pill">Confidence ${confidenceLabel(hero.confidence)}</span>${experimental ? '<span class="pill pill-experimental">Experimental</span>' : ''}</div></div>
     </div>${experimental ? `<div class="alert alert-info"><strong>Experimental score.</strong> Computed from ${availableDims}/${totalDims} comparable dimensions (${pct(hero.coverage)} coverage). Soil texture and volcano proximity are shown below but are not added to the score. Missing dimensions are never inferred.</div>` : ''}` : pending ? `<div class="alert alert-info"><strong>Rating this Earth site…</strong> Loading both planetary DEMs and comparing against every curated Moon and Mars site. The live measurements below are already available.</div>` : matchError ? `<div class="alert alert-warn"><strong>Planetary match unavailable.</strong> ${esc(matchError)}</div>` : `<div class="alert alert-info"><strong>No comparable planetary match.</strong> The available measurements do not overlap enough with a curated planetary site to issue a grade.</div>`}
+    <div class="action-row"><button type="button" class="ghost-btn" data-action="share">Copy analysis link</button></div>
     ${renderSpaceComparison(matches, profile)}
     ${c ? `<dl class="metric-list">
       <div><dt>Mean air temperature</dt><dd>${c.tempMeanK} K <small>(${c.tempMeanC} °C)</small></dd>${evidenceChip('derived')}<p>${esc(c.tempType)}</p></div>
@@ -1591,7 +1786,7 @@ function renderTwinInspector() {
       <p class="fine">${esc(planet.site.summary)}</p>
       <ul class="source-list">${sourceLinks(planet.site.sources)}</ul></section>
     <section class="panel-section"><div class="section-head"><h3>Earth-side sources</h3></div><ul class="source-list">${sourceLinks(earthSources)}</ul>${profile.climate ? `<p class="fine">${esc(profile.climate.source)} · ${esc(profile.climate.period)}</p>` : ''}</section>
-    <div class="action-row"><button type="button" class="ghost-btn" data-action="exit-twin">Exit Earth Twin Mode</button></div>`;
+    <div class="action-row"><button type="button" class="ghost-btn" data-action="share">Copy analysis link</button><button type="button" class="ghost-btn" data-action="exit-twin">Exit Earth Twin Mode</button></div>`;
 }
 
 function renderComparisonBlock(compare) {
@@ -1690,6 +1885,27 @@ function bind() {
     state.assessed = null;
     state.lastRecalc = null;
     renderAll();
+    syncUrlState();
+  });
+
+  analysisToggle?.addEventListener('click', () => {
+    const open = !inspectorRail?.classList.contains('is-open');
+    setInspectorOpen(open);
+  });
+  $('#inspector-close')?.addEventListener('click', closeInspector);
+  railScrim?.addEventListener('click', closeInspector);
+
+  const search = $('#candidate-search');
+  search?.addEventListener('input', (e) => {
+    state.search = e.target.value;
+    renderCandidates();
+  });
+  search?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    state.search = '';
+    search.value = '';
+    renderCandidates();
   });
 
   $('#twin-toggle').addEventListener('click', () => {
@@ -1764,6 +1980,15 @@ function bind() {
   });
 
   candidatesBody.addEventListener('click', (e) => {
+    const clear = e.target.closest('[data-clear-search]');
+    if (clear) {
+      state.search = '';
+      const search = $('#candidate-search');
+      if (search) search.value = '';
+      renderCandidates();
+      search?.focus();
+      return;
+    }
     const retry = e.target.closest('[data-retry-pool]');
     if (retry) {
       state.earthPoolState = 'idle';
@@ -1789,6 +2014,8 @@ function bind() {
     if (action === 'copy') {
       const text = formatCoord(Number(btn.dataset.lat), Number(btn.dataset.lon));
       navigator.clipboard?.writeText(text).then(() => toast(`Copied ${text}`, 'ok', 2500)).catch(() => {});
+    } else if (action === 'share') {
+      shareAnalysis();
     } else if (action === 'fly') {
       const row = selectedAssessment();
       if (row) state.globe?.flyTo(row.site.lat, row.site.lon);
@@ -1821,9 +2048,23 @@ function bind() {
     }
   });
 
-  window.addEventListener('resize', resizeMaps);
+  window.addEventListener('resize', () => {
+    resizeMaps();
+    if (window.innerWidth > 1180) setInspectorOpen(false);
+  });
   window.addEventListener('error', (e) => {
     if (e.message) console.error('[RADIUM]', e.message);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeInspector();
+      return;
+    }
+    const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+    if (e.key === '/' && !typing && !document.body.classList.contains('modal-open')) {
+      e.preventDefault();
+      $('#candidate-search')?.focus();
+    }
   });
 }
 
@@ -1851,6 +2092,8 @@ async function switchBody(body) {
   state.body = body;
   state.layer = 'sites';
   state.selection = null;
+  state.search = '';
+  setInspectorOpen(false);
   state.twin.active = false;
   state.twin.rankings = [];
   state.twin.allRankings = [];
@@ -1873,11 +2116,12 @@ async function switchBody(body) {
     state.globeBody = null;
     setCoordReadout(0, 0, '');
     $('#coord-readout').textContent = '—';
-    setDemStatus('Earth terrain · Copernicus');
+    setDemStatus('Earth · Copernicus');
     renderMissionSelect();
     await ensureEarthMap();
     resizeMaps();
     renderAll();
+    syncUrlState();
     ensureEarthPool().then(() => {
       if (state.body === 'earth' && !state.twin.active) rateEarthPool();
     });
@@ -1888,12 +2132,12 @@ async function switchBody(body) {
   state.assessed = null;
   state.lastRecalc = null;
   renderMissionSelect();
-  setDemStatus(`${BODIES[body].label} DEM loading…`);
+  setDemStatus(`${BODIES[body].label} loading…`);
   try {
     if (!state.dems[body]) state.dems[body] = await loadDem(body);
-    setDemStatus(`${BODIES[body].label} DEM · 0.25°/px`);
+    setDemStatus(`${BODIES[body].label} · 0.25°/px`);
   } catch (err) {
-    setDemStatus(`${BODIES[body].label} DEM unavailable`, false);
+    setDemStatus(`${BODIES[body].label} unavailable`, false);
     toast(`Could not load ${body} DEM: ${err.message}`, 'error', 8000);
   }
   await ensureGlobe();
@@ -1901,25 +2145,69 @@ async function switchBody(body) {
   const defaultSite = body === 'moon' ? 'connecting-ridge' : 'jezero';
   selectSite(defaultSite);
   state.globe?.flyTo(BODY_SITES[body].find((s) => s.id === defaultSite).lat, BODY_SITES[body].find((s) => s.id === defaultSite).lon);
+  syncUrlState();
 }
 
 async function boot() {
   bind();
+  startClock();
+  const initial = readUrlState();
+
+  if (initial.body && initial.body !== 'moon') {
+    await switchBody(initial.body);
+    if (initial.mission && MISSION_PROFILES[initial.mission]?.body === state.body) {
+      state.missionId = initial.mission;
+      state.priorities = {};
+      state.assessed = null;
+      state.lastRecalc = null;
+      renderMissionSelect();
+      renderAll();
+    }
+    if (state.body === 'earth') {
+      if (initial.earth && EARTH_ANALOGS.some((a) => a.id === initial.earth)) {
+        await selectEarthAnalog(initial.earth);
+      } else if (initial.lat !== null && initial.lon !== null) {
+        await onEarthPick({ lat: initial.lat, lon: initial.lon });
+      }
+    } else if (initial.site && (BODY_SITES[state.body] || []).some((s) => s.id === initial.site)) {
+      selectSite(initial.site);
+    } else if (initial.lat !== null && initial.lon !== null) {
+      onPlanetPick({ lat: initial.lat, lon: initial.lon });
+    }
+    if (initial.twin && state.body !== 'earth') {
+      await activateTwin();
+      if (initial.earth && EARTH_ANALOGS.some((a) => a.id === initial.earth)) await selectEarthAnalog(initial.earth);
+      else if (initial.lat !== null && initial.lon !== null) await onEarthPick({ lat: initial.lat, lon: initial.lon });
+    }
+    updateEarthStatus();
+    syncUrlState();
+    return;
+  }
+
+  if (initial.mission && MISSION_PROFILES[initial.mission]?.body === 'moon') state.missionId = initial.mission;
   renderMissionSelect();
-  setDemStatus('Lunar DEM loading…');
+  setDemStatus('Lunar loading…');
   try {
     state.dems.moon = await loadDem('moon');
-    setDemStatus('Lunar DEM · 0.25°/px');
+    setDemStatus('Lunar · 0.25°/px');
   } catch (err) {
-    setDemStatus('Lunar DEM unavailable', false);
+    setDemStatus('Lunar unavailable', false);
     toast(`Lunar DEM unavailable: ${err.message}`, 'error', 9000);
   }
   app.dataset.view = 'moon';
   renderAll();
   await ensureGlobe();
-  selectSite('connecting-ridge');
+  const moonSite = initial.site && MOON_SITES.some((s) => s.id === initial.site) ? initial.site : 'connecting-ridge';
+  selectSite(moonSite);
+  if (initial.lat !== null && initial.lon !== null && !initial.site) onPlanetPick({ lat: initial.lat, lon: initial.lon });
+  if (initial.twin) {
+    await activateTwin();
+    if (initial.earth && EARTH_ANALOGS.some((a) => a.id === initial.earth)) await selectEarthAnalog(initial.earth);
+    else if (initial.lat !== null && initial.lon !== null) await onEarthPick({ lat: initial.lat, lon: initial.lon });
+  }
   updateEarthStatus();
-  // Keep Earth data lazy: it is only fetched when Earth Twin Mode is opened.
+  syncUrlState();
+  // Keep Earth data lazy: it is only fetched when Earth Mode or Twin Mode is opened.
 }
 
 boot();
