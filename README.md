@@ -1,16 +1,32 @@
 # RADIUM
 
-**Planetary analog intelligence** — an independent mission-science console for Moon, Mars and Earth analog analysis. Built for the NASA Space Apps Challenge.
+**Planetary analog intelligence** — an independent mission-science console for Moon, Mars and Earth analog analysis.
 
-RADIUM lets you explore the Moon and Mars on interactive 3D globes, evaluate real sites against configurable mission priorities, get explainable letter grades, and activate **Earth Twin Mode** to find terrestrial environments that share measurable characteristics with a planetary site.
+RADIUM asks two questions and keeps them strictly apart. First, *where on the Moon or Mars should a mission go, and why?* Second, *what place on Earth is the closest measurable stand-in for that site?* You explore the Moon and Mars on interactive 3D globes, score real sites against configurable mission priorities, get letter grades you can open up factor by factor, and switch on **Earth Twin Mode** to rank terrestrial environments by measured similarity to the planetary site you are looking at.
 
-It is built as a working scientific application, not a mockup. Elevation, slope and roughness are computed live from bundled NASA DEMs; Earth climate comes from live NASA POWER climatology (ERA5 fallback); imagery is streamed from NASA's Solar System Treks and NASA GIBS. Where data does not exist, RADIUM says so, reduces coverage/confidence, and refuses to invent a value.
+It is built as a working scientific application, not a mockup. Elevation, slope and roughness are computed live from bundled NASA DEMs; Earth climate comes from live NASA POWER climatology (ERA5 fallback); imagery is streamed from NASA's Solar System Treks and NASA GIBS. Where data does not exist, RADIUM says so, reduces coverage and confidence, and refuses to invent a value.
 
 ![RADIUM mission console showing the lunar globe, mission telemetry, ranked sites and an Apollo 11 decision brief.](docs/radium-desktop.png)
 
 <sub>Desktop mission console. The responsive mobile layout is captured in [docs/radium-mobile.png](docs/radium-mobile.png).</sub>
 
 > RADIUM is an independent research tool. It is not an official NASA product, and its grades are not NASA certification, landing approval, or a substitute for mission-specific engineering analysis.
+
+---
+
+## One of three prototypes in the Rice Cooker submission
+
+This repository is **prototype one of three** built by **Rice Cooker** for the **NASA Space Apps Challenge, Princeton 2026**. The team did not enter three separate projects. The three prototypes were built in parallel, each exploring a different way to make planetary science usable, and were then **merged into a single submission**: one entry, one narrative, three complementary working prototypes presented together rather than as competitors.
+
+RADIUM is the analysis-and-mapping prototype. Its job in the merged submission is the part that the other two do not attempt:
+
+- **Planetary site assessment** — Moon and Mars sites scored against real mission profiles, with explainable grades and explicit data gaps.
+- **Terrestrial analog discovery** — Earth Twin Mode, which measures Earth sites live and ranks them against a chosen planetary site, or runs the same match in reverse for any Earth coordinate.
+- **The science console itself** — the globes, DEM sampling, ranking lists, comparison views and provenance registry that present all of it on screen.
+
+Each prototype kept its own codebase and its own README so the work stays inspectable, reproducible and individually runnable; the merged submission presents them as one body of work. RADIUM is deliberately a **static, zero-dependency, no-build-step application**, which is what made it possible to fold into the combined submission without a shared toolchain or a deployment rewrite — it can be served from a single command, hosted on any static host, and linked or embedded alongside the other two prototypes.
+
+RADIUM is independent work. NASA Space Apps is a challenge programme, not an endorsement, and nothing here should be read as NASA certification of a site.
 
 ---
 
@@ -33,7 +49,7 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 
 ---
 
-## What is implemented
+## Features
 
 | Area | Status |
 | --- | --- |
@@ -56,12 +72,17 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 | Statistical shortlist of less-studied Earth candidates for the selected planetary site | Working (curated pool only) |
 | 0–100 Earth similarity estimates on every pin, candidate row and comparison hero | Working |
 | Top-five-only Earth-analog matrix in Twin Mode, plus top-five Moon/Mars comparison for any Earth site | Working |
-| Earth Twin Mode: live NASA POWER/DEM measurements, top-five terrestrial analogs, arbitrary clicked Earth coordinates, dimension grades | Working |
 | Earth dossier: overall best-planet match, eight-factor analog profile, brightness/albedo factors, explicit data gaps | Working |
 | Experimental score for any clicked Earth coordinate from live climate, multi-scale terrain, SoilGrids and Smithsonian volcano context | Working |
 | Side-by-side comparison, strong/weak matches, applications, physical mismatches | Working |
 | Dataset registry with provenance, resolution, licensing and limitations | Working |
 | Context imagery at the selected coordinate | Working (NASA tiles drawn client-side) |
+
+### What the three views do
+
+- **Moon / Mars** — a 3D globe, a ranked candidate list and a per-site decision brief. Thirteen mission factors covering ice, solar energy, luminosity, thermal cycling, trafficability, slope, roughness, thermal conditions, communications, dust, landing altitude, geology and exploration value feed the mission profile you pick. Sliders re-weight priorities and the ranking, shares and explanations update live.
+- **Earth** — a 2D map where each curated terrestrial site is measured live and scored against its single best Moon or Mars match, so a pin answers "what is this place the best analog of?" rather than just "where is it?"
+- **Earth Twin Mode** — both maps side by side. A planetary site on the left, the top five measured Earth analogs on the right, and a factor-by-factor comparison with strong matches, weak matches, real-world applications and physical mismatches. Any clicked Earth coordinate can be compared the same way, including an experimental score built from live climatology, multi-scale terrain, topsoil texture and the nearest Holocene volcano.
 
 ### Console accessibility and resilience
 
@@ -83,8 +104,6 @@ Requires Node 20+ (developed on Node 24). The app itself is plain ES modules.
 ---
 
 ## Scientific design in one page
-
-RADIUM keeps two questions strictly apart:
 
 1. **Site suitability** — weighted multicriteria model over mission-specific factors:
    `S = Σ(wᵢ·sᵢ) / Σwᵢ`, with weights normalised over available factors. Hard screens can cap a grade at F. Coverage and confidence are reported; a grade is withheld below 50% data coverage.
@@ -117,6 +136,7 @@ js/data/
   mars-sites.js            15 curated Mars sites with evidence classes
   analogs.js               34 terrestrial candidate sites (no hardcoded climate)
   earth-climate.js         Live NASA POWER/ERA5 + Copernicus DEM sampling and indices
+  earth-context.js         SoilGrids and Smithsonian volcano context
 
 js/science/
   grade.js                 A–F bands, piecewise interpolation, formatting
@@ -190,9 +210,11 @@ No values are altered other than byte order. Percentiles are used only for colou
 - Similarity bounded 0–1, symmetry of affinity matrices, identical values → 1.0, missing dimensions renormalised, incomparable physics listed.
 - DEM bilinear sampling, Horn slope on synthetic grids, roughness behaviour.
 - NASA POWER and ERA5 summariser arithmetic, aridity and comparable solar fraction.
+- SoilGrids texture conversion and nearest-volcano context.
+- Earth-to-planet ranking symmetry and eight-factor Earth grading.
 - Catalog integrity: unique ids, valid coordinates/groups, provenance references, polar illumination overrides, no hardcoded Earth climate.
 
-Run `node server.mjs` and open the app to exercise live layers. Verification notes for this build are in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md#validation).
+Run `node server.mjs` and open the app to exercise live layers. Verification notes for this build are in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md#7-validation).
 
 ---
 
@@ -212,7 +234,7 @@ This build is presented as a research console, not as a certified operational sy
 | Deployment | Static, dependency-free server; no build step; can be hosted on any static host. |
 | Independence | No NASA endorsement is claimed or implied; the interface states that RADIUM is independent. |
 
-Known gaps are listed in [Scope](#explicitly-not-implemented) and in the in-app Scope panel. Certified landing-hazard analysis, global per-pixel planetary temperature/ice rasters, and radiation/atmosphere simulation are deliberately out of scope.
+Known gaps are listed in [Explicitly not implemented](#explicitly-not-implemented) and in the in-app Scope panel. Certified landing-hazard analysis, global per-pixel planetary temperature/ice rasters, and radiation/atmosphere simulation are deliberately out of scope.
 
 ---
 
@@ -223,7 +245,8 @@ Known gaps are listed in [Scope](#explicitly-not-implemented) and in the in-app 
 - NASA GIBS / EOSDIS for Earth imagery and environmental layers.
 - NASA POWER (NASA Langley Research Center; MERRA-2/POWER) for Earth climatology.
 - ERA5 / Copernicus Climate Change Service (fallback) and Copernicus DEM, accessed through Open-Meteo (subject to their terms).
+- ISRIC SoilGrids for topsoil context; Smithsonian Global Volcanism Program for volcanic context.
 - Esri World Imagery / reference labels where selected (attribution on map).
 - CesiumJS and MapLibre GL JS (Apache-2.0 / BSD).
 
-RADIUM is an independent Space Apps project and is not an official NASA product. Site grades are exploratory scientific assessments, not mission approval.
+**Rice Cooker** — NASA Space Apps Challenge, Princeton 2026. RADIUM is one of three prototypes merged into the team's single submission. It is an independent project, not an official NASA product. Site grades are exploratory scientific assessments, not mission approval.
