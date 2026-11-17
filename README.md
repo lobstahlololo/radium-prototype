@@ -14,17 +14,17 @@ It is built as a working scientific application, not a mockup. Elevation, slope 
 
 ---
 
-## One of three prototypes in the Rice Cooker submission
+## One of three prototypes in the Rice Cookers submission
 
-This repository is **prototype one of three** built by **Rice Cooker** for the **NASA Space Apps Challenge, Princeton 2026**. The team did not enter three separate projects. The three prototypes were built in parallel, each exploring a different way to make planetary science usable, and were then **merged into a single submission**: one entry, one narrative, three complementary working prototypes presented together rather than as competitors.
+This repository is **prototype one of three** built by **Rice Cookers** for the **NASA Space Apps Challenge, Princeton 2026**. The three prototypes were not three different features. The team wrote one brief — the same problem, the same purpose, the same constraints — and gave it to three different AI models, each of which returned a complete, independently built prototype from that prompt. The three answers were then **merged into a single submission**: one entry, one narrative, three takes on the same brief, presented so that the comparison between them is part of what the team is showing.
 
-RADIUM is the analysis-and-mapping prototype. Its job in the merged submission is the part that the other two do not attempt:
+RADIUM is one of those three answers. Its take on the shared brief is an explainable analysis console:
 
 - **Planetary site assessment** — Moon and Mars sites scored against real mission profiles, with explainable grades and explicit data gaps.
 - **Terrestrial analog discovery** — Earth Twin Mode, which measures Earth sites live and ranks them against a chosen planetary site, or runs the same match in reverse for any Earth coordinate.
 - **The science console itself** — the globes, DEM sampling, ranking lists, comparison views and provenance registry that present all of it on screen.
 
-Each prototype kept its own codebase and its own README so the work stays inspectable, reproducible and individually runnable; the merged submission presents them as one body of work. RADIUM is deliberately a **static, zero-dependency, no-build-step application**, which is what made it possible to fold into the combined submission without a shared toolchain or a deployment rewrite — it can be served from a single command, hosted on any static host, and linked or embedded alongside the other two prototypes.
+Each prototype kept its own codebase and its own README so all three AI outputs stay inspectable, reproducible, individually runnable and directly comparable — nothing was rewritten into a shared house style. The merge happens at the level of the submission, not the code: the three prototypes are presented as one body of work. RADIUM is deliberately a **static, zero-dependency, no-build-step application**, which is what made it possible to fold into the combined submission without a shared toolchain or a deployment rewrite — it can be served from a single command, hosted on any static host, and linked or embedded alongside the other two builds.
 
 RADIUM is independent work. NASA Space Apps is a challenge programme, not an endorsement, and nothing here should be read as NASA certification of a site.
 
@@ -249,4 +249,4 @@ Known gaps are listed in [Explicitly not implemented](#explicitly-not-implemente
 - Esri World Imagery / reference labels where selected (attribution on map).
 - CesiumJS and MapLibre GL JS (Apache-2.0 / BSD).
 
-**Rice Cooker** — NASA Space Apps Challenge, Princeton 2026. RADIUM is one of three prototypes merged into the team's single submission. It is an independent project, not an official NASA product. Site grades are exploratory scientific assessments, not mission approval.
+**Rice Cookers** — NASA Space Apps Challenge, Princeton 2026. RADIUM is one of three prototypes produced from the same brief by three different AI models and merged into the team's single submission. It is an independent project, not an official NASA product. Site grades are exploratory scientific assessments, not mission approval.
