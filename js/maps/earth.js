@@ -89,7 +89,7 @@ export class EarthMap {
         version: 8,
         sources: {
           bm: { type: 'raster', tiles: [SOURCES['blue-marble']], tileSize: 256, maxzoom: 8, attribution: 'NASA GIBS · Blue Marble' },
-          sat: { type: 'raster', tiles: [SOURCES.satellite], tileSize: 256, maxzoom: 8, attribution: 'Imagery © Esri' },
+          sat: { type: 'raster', tiles: [SOURCES.satellite], tileSize: 256, maxzoom: 8, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' },
           topo: { type: 'raster', tiles: [SOURCES.topography], tileSize: 256, maxzoom: 8, attribution: 'NASA GIBS · ASTER GDEM' },
           lst: { type: 'raster', tiles: [SOURCES.lst], tileSize: 256, maxzoom: 7, attribution: 'NASA GIBS · MODIS LST' },
           albedo: { type: 'raster', tiles: [SOURCES.albedo], tileSize: 256, maxzoom: 8, attribution: 'NASA GIBS · MODIS albedo' },

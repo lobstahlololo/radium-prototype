@@ -132,7 +132,7 @@ export const MODAL_CONTENT = {
       <p>Each measurement shown in RADIUM traces to a record below. Planetary DEMs are bundled for reproducible point queries; imagery and Earth measurements are fetched live from agency services. Links open the original archives.</p>
       <div class="source-grid">${datasetCards()}</div>
       <h3>Attribution</h3>
-      <p>NASA imagery and PDS data are public domain; attribution to the mission and instrument is retained on the map and in site panels. NASA POWER and ERA5/Copernicus data remain subject to their providers' terms. Esri reference labels are used with attribution on the map. RADIUM is an independent Space Apps project and is not an official NASA product.</p>
+      <p>NASA imagery and PDS data are public domain; attribution to the mission and instrument is retained on the map and in site panels. NASA POWER, Open-Meteo (ERA5 climatology and Copernicus elevation), Copernicus DEM and Esri World Imagery are used under their providers' terms, with attribution shown on the map and in the status bar. SoilGrids 2.0 is © ISRIC — World Soil Information, licensed CC BY 4.0. Smithsonian Global Volcanism Program volcano records are cited with a link to the individual record. RADIUM is an independent Space Apps project and is not an official NASA product; no NASA endorsement is claimed or implied.</p>
     </div>`,
 
   scope: () => `
