@@ -1,8 +1,9 @@
 /**
  * 3D planetary globe on CesiumJS with body-correct ellipsoids and NASA Trek
- * WMTS imagery. All markers are curated sites; terrain layers come from the
- * bundled DEMs. If Cesium or the imagery service is unavailable the map reports
- * that explicitly instead of showing a decorative substitute.
+ * WMTS imagery. Markers are curated sites or user-clicked terrain points;
+ * terrain layers come from the bundled DEMs. If Cesium or the imagery service
+ * is unavailable the map reports that explicitly instead of showing a
+ * decorative substitute.
  */
 
 const IMAGERY = {
@@ -173,7 +174,7 @@ export class PlanetGlobe {
     return this;
   }
 
-  /** sites: [{...site, grade}] */
+  /** sites: curated sites or clicked points, each with lat/lon and optional grade. */
   setSites(sites) {
     if (!this.viewer || !this.markerLayer) return;
     const C = window.Cesium;
@@ -182,20 +183,22 @@ export class PlanetGlobe {
     this.markerLayer.replaceChildren();
 
     for (const site of sites) {
+      const isPoint = site.kind === 'point';
       const grade = site.grade || '—';
       const marker = document.createElement('button');
       marker.type = 'button';
-      marker.className = `globe-marker grade-${grade === '—' ? 'U' : grade}${site.id === this.selectedId ? ' is-selected' : ''}`;
+      marker.className = `globe-marker ${isPoint ? 'is-point' : `grade-${grade === '—' ? 'U' : grade}`}${site.id === this.selectedId ? ' is-selected' : ''}`;
       marker.dataset.siteId = site.id;
-      marker.title = `${site.name} — suitability grade ${grade}`;
-      marker.setAttribute('aria-label', `${site.name}, suitability grade ${grade}`);
+      marker.title = isPoint ? `${site.name} — clicked coordinate` : `${site.name} — suitability grade ${grade}`;
+      marker.setAttribute('aria-label', isPoint ? `${site.name}, clicked coordinate` : `${site.name}, suitability grade ${grade}`);
       marker.innerHTML = `
         <span class="globe-marker-label">${escapeHtml(site.name)}</span>
-        <span class="globe-marker-badge">${escapeHtml(grade)}</span>
+        <span class="globe-marker-badge">${isPoint ? '+' : escapeHtml(grade)}</span>
         <span class="globe-marker-tip" aria-hidden="true"></span>`;
       marker.addEventListener('click', (event) => {
         event.stopPropagation();
-        this.onSiteSelect?.(site.id);
+        if (isPoint) this.onPick?.({ lat: site.lat, lon: site.lon });
+        else this.onSiteSelect?.(site.id);
       });
       this.markerLayer.appendChild(marker);
       this._markers.set(site.id, {

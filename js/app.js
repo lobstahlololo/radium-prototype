@@ -21,7 +21,7 @@ import { buildTerrainRaster, TERRAIN_LAYERS } from './maps/dem-layer.js';
 import { PlanetGlobe } from './maps/globe.js';
 import { EarthMap, EARTH_LAYERS, EARTH_BASEMAPS } from './maps/earth.js';
 import { drawContextThumb } from './maps/thumb.js';
-import { buildEarthProfile, buildPool, brightnessClass } from './data/earth-climate.js';
+import { buildEarthProfileCore, buildPool, brightnessClass, fetchEarthContext, mergeEarthContext } from './data/earth-climate.js';
 import { openModal } from './ui/modals.js';
 
 const BODY_SITES = { moon: MOON_SITES, mars: MARS_SITES };
@@ -61,6 +61,7 @@ const state = {
   earthPoolRatingPromise: null,
   planetMatchPool: null,
   planetMatchPoolPromise: null,
+  planetPoints: { moon: [], mars: [] },
   twin: { active: false, planetSiteId: null, rankings: [], allRankings: [], measuredCount: 0, selectedAnalogId: null, compare: null, custom: null },
   lastRecalc: null,
   loading: null,
@@ -210,7 +211,7 @@ async function rateEarthPool() {
     if (state.body === 'earth' && !state.twin.active) {
       renderCandidates();
       updateEarthMarkers();
-      if (state.selection?.kind === 'earth') renderInspector();
+      if (state.selection?.kind === 'earth') renderInspector({ preserveScroll: true });
     }
   }
 }
@@ -278,7 +279,7 @@ function updateSelectionStatus() {
   } else if (sel?.kind === 'earth-error') {
     text = 'Earth measurement unavailable';
   } else if (sel?.kind === 'planet-point') {
-    text = 'Terrain-only coordinate';
+    text = sel.name || 'Terrain-only coordinate';
   } else if (state.twin.active) {
     text = 'Awaiting Earth analog';
   }
@@ -493,17 +494,26 @@ async function ensureGlobe() {
 function updateGlobeSites() {
   if (!state.globe) return;
   const rows = getAssessed();
-  state.globe.selectedId = selectedAssessment()?.site.id || null;
-  state.globe.setSites(
-    rows.map((r) => ({
-      id: r.site.id,
-      name: r.site.name,
-      lat: r.site.lat,
-      lon: r.site.lon,
-      grade: r.grade,
-      elevationM: r.terrain?.elevationM ?? 0,
-    })),
-  );
+  const selectedPoint = state.selection?.kind === 'planet-point' ? state.selection : null;
+  state.globe.selectedId = selectedPoint?.pointId || selectedAssessment()?.site.id || null;
+  const siteMarkers = rows.map((r) => ({
+    id: r.site.id,
+    name: r.site.name,
+    lat: r.site.lat,
+    lon: r.site.lon,
+    grade: r.grade,
+    elevationM: r.terrain?.elevationM ?? 0,
+  }));
+  const pointMarkers = (state.planetPoints[state.body] || []).map((point) => ({
+    id: point.id,
+    name: point.name,
+    lat: point.lat,
+    lon: point.lon,
+    grade: UNRATED,
+    kind: 'point',
+    elevationM: point.terrain?.elevationM ?? 0,
+  }));
+  state.globe.setSites([...siteMarkers, ...pointMarkers]);
 }
 
 function applyPlanetLayer() {
@@ -647,7 +657,7 @@ async function selectEarthAnalog(id) {
   openInspector();
   state.earthMap?.flyTo(analog.lat, analog.lon, 4.5);
   try {
-    const profile = await buildEarthProfile(analog);
+    const profile = await buildEarthProfileCore(analog);
     state.selection = { kind: 'earth', profile, custom: false };
     if (state.twin.active && selectedAssessment()) {
       setTwinComparison(profile);
@@ -702,7 +712,7 @@ async function onEarthPick({ lat, lon }) {
   renderInspector();
   openInspector();
   try {
-    const profile = await buildEarthProfile({
+    const core = await buildEarthProfileCore({
       id: 'custom-earth-point',
       name: 'Clicked Earth point',
       country: '',
@@ -712,9 +722,38 @@ async function onEarthPick({ lat, lon }) {
       volatileGroup: null,
       established: false,
       landform: 'User-selected coordinate',
-    }, { detailed: true, includeContext: true });
+    }, { detailed: true });
     if (state.selection?.kind !== 'earth-loading' || state.selection.lat !== customLat || state.selection.lon !== customLon) return;
+    const profile = {
+      ...core,
+      contextPending: true,
+      dataStatus: {
+        ...core.dataStatus,
+        soil: { pending: true, detail: 'Fetching SoilGrids 0–30 cm topsoil…' },
+        volcano: { pending: true, detail: 'Fetching the nearest Smithsonian Holocene center…' },
+      },
+    };
     applyCustomEarthProfile(profile);
+    fetchEarthContext(profile.lat, profile.lon)
+      .then((context) => {
+        if (state.selection?.profile !== profile && state.twin.custom !== profile) return;
+        const merged = mergeEarthContext(profile, context);
+        if (state.selection?.profile === profile) state.selection.profile = merged;
+        if (state.twin.custom === profile) state.twin.custom = merged;
+        renderInspector({ preserveScroll: true });
+      })
+      .catch((err) => {
+        if (state.selection?.profile !== profile && state.twin.custom !== profile) return;
+        const failed = mergeEarthContext(profile, {
+          dataStatus: {
+            soil: { ok: false, error: err.message },
+            volcano: { ok: false, error: err.message },
+          },
+        });
+        if (state.selection?.profile === profile) state.selection.profile = failed;
+        if (state.twin.custom === profile) state.twin.custom = failed;
+        renderInspector({ preserveScroll: true });
+      });
   } catch (err) {
     if (state.selection?.kind !== 'earth-loading' || state.selection.lat !== customLat || state.selection.lon !== customLon) return;
     state.selection = { kind: 'earth-error', name: 'Clicked Earth point', message: err.message, twin: state.twin.active };
@@ -752,17 +791,48 @@ function selectSite(id) {
   if (state.globe && !state.twin.active) state.globe.flyTo(site.lat, site.lon);
 }
 
+function planetPointId(body, lat, lon) {
+  return `point:${body}:${Number(lat).toFixed(3)},${Number(lon).toFixed(3)}`;
+}
+
+function rememberPlanetPoint(body, lat, lon, terrain) {
+  const points = state.planetPoints[body] || (state.planetPoints[body] = []);
+  const id = planetPointId(body, lat, lon);
+  let point = points.find((entry) => entry.id === id);
+  if (!point) {
+    point = { id, body, name: `Clicked point ${points.length + 1}`, lat, lon, terrain };
+    points.push(point);
+  } else {
+    point.lat = lat;
+    point.lon = lon;
+    point.terrain = terrain;
+  }
+  return point;
+}
+
 function onPlanetPick({ lat, lon }) {
-  setCoordReadout(lat, lon, BODIES[state.body].label);
-  const near = nearestSite(state.body, lat, lon);
+  const pointLat = Number(lat.toFixed(3));
+  const pointLon = Number(lon.toFixed(3));
+  setCoordReadout(pointLat, pointLon, BODIES[state.body].label);
+  const near = nearestSite(state.body, pointLat, pointLon);
   if (near && near.km < 220) {
     selectSite(near.site.id);
     if (state.twin.active) state.globe?.flyTo(near.site.lat, near.site.lon);
     return;
   }
   const dem = state.dems[state.body];
-  const terrain = dem ? dem.sample(lat, lon) : null;
-  state.selection = { kind: 'planet-point', body: state.body, lat, lon, terrain, nearest: near };
+  const terrain = dem ? dem.sample(pointLat, pointLon) : null;
+  const point = rememberPlanetPoint(state.body, pointLat, pointLon, terrain);
+  state.selection = {
+    kind: 'planet-point',
+    body: state.body,
+    pointId: point.id,
+    name: point.name,
+    lat: pointLat,
+    lon: pointLon,
+    terrain,
+    nearest: near,
+  };
   if (state.twin.active) {
     state.twin.compare = null;
     state.twin.selectedAnalogId = null;
@@ -1084,13 +1154,24 @@ function renderCandidates() {
         ? 'rating Earth sites…'
         : state.earthPoolState === 'loading'
           ? 'live climate loading…'
-          : 'best of 31 planetary sites';
-    const allRows = EARTH_ANALOGS.map((analog, index) => ({ analog, rank: index + 1 }));
+          : 'ranked by best planetary match';
+    const allRows = EARTH_ANALOGS
+      .map((analog) => ({ analog, best: state.earthMatches[analog.id]?.[0] || null }))
+      .sort((a, b) => {
+        if (a.best && b.best) {
+          return b.best.score - a.best.score
+            || b.best.confidence - a.best.confidence
+            || a.analog.name.localeCompare(b.analog.name);
+        }
+        if (a.best) return -1;
+        if (b.best) return 1;
+        return a.analog.name.localeCompare(b.analog.name);
+      })
+      .map((row, index) => ({ ...row, rank: index + 1 }));
     const rows = allRows.filter(({ analog }) => matches(analog.name, analog.country, analog.substrateGroup, analog.landform));
     setCandidateCount(rows.length, allRows.length, 'sites');
     bodyEl.innerHTML = rows.length ? rows.map(
-      ({ analog: a, rank }) => {
-        const best = state.earthMatches[a.id]?.[0];
+      ({ analog: a, best, rank }) => {
         const strength = best
           ? `${Math.round(best.score)}/100 · mimics ${best.planetSite.name}`
           : state.earthPoolState === 'loading' || state.earthPoolRatingState === 'loading'
@@ -1218,8 +1299,9 @@ function inspectorShell(content) {
   return `<div class="inspector-scroll">${content}</div>`;
 }
 
-function renderInspector() {
+function renderInspector({ preserveScroll = false } = {}) {
   if (!inspector) return;
+  const previousScroll = preserveScroll ? (inspector.querySelector('.inspector-scroll')?.scrollTop || 0) : 0;
   if (state.selection?.kind === 'site') {
     inspector.innerHTML = inspectorShell(renderSiteInspector());
   } else if (state.selection?.kind === 'planet-point') {
@@ -1243,6 +1325,10 @@ function renderInspector() {
     inspector.innerHTML = inspectorShell(renderEmptyInspector());
   }
   scheduleThumb();
+  if (preserveScroll) {
+    const scroller = inspector.querySelector('.inspector-scroll');
+    if (scroller) scroller.scrollTop = previousScroll;
+  }
 }
 
 function contextFigure(caption) {
@@ -1524,8 +1610,8 @@ function renderPlanetPointInspector() {
   const near = sel.nearest;
   return `
     <div class="inspector-head">
-      <p class="eyebrow">${esc(BODIES[sel.body].label)} · selected coordinate</p>
-      <h2>Terrain-only inspection</h2>
+      <p class="eyebrow">${esc(BODIES[sel.body].label)} · clicked point</p>
+      <h2>${esc(sel.name || 'Terrain-only inspection')}</h2>
       <p class="coord-line">${formatCoord(sel.lat, sel.lon)}</p>
     </div>
     ${contextFigure()}
@@ -1617,6 +1703,9 @@ function renderBrightnessFactors(c) {
 
 function statusRow(label, status) {
   if (!status) return '';
+  if (status.pending) {
+    return `<div><dt>${esc(label)}</dt><dd class="status-pending">Loading</dd><p>${esc(status.detail || '')}</p></div>`;
+  }
   return `<div><dt>${esc(label)}</dt><dd class="${status.ok ? 'status-ok' : 'status-warn'}">${status.ok ? 'Available' : 'Unavailable'}</dd><p>${esc(status.ok ? [status.source, status.detail].filter(Boolean).join(' · ') : status.error)}</p></div>`;
 }
 
@@ -1647,7 +1736,10 @@ function renderTerrainScaleRows(profile) {
 
 function renderSoilContext(profile) {
   const s = profile.soil;
-  if (!s) return '';
+  if (!s) {
+    if (!profile.contextPending) return '';
+    return `<section class="panel-section"><div class="section-head"><h3>Regolith &amp; soil proxy</h3><span class="fine">loading…</span></div><p class="fine">Fetching SoilGrids 0–30 cm topsoil context in the background. It is not used in the experimental score.</p></section>`;
+  }
   const value = (n, suffix = '') => Number.isFinite(n) ? `${n}${suffix}` : 'Data unavailable.';
   return `<section class="panel-section">
     <div class="section-head"><h3>Regolith &amp; soil proxy</h3><span class="fine">SoilGrids 2.0 · ${esc(s.depth)}</span></div>
@@ -1667,7 +1759,10 @@ function renderSoilContext(profile) {
 
 function renderVolcanoContext(profile) {
   const v = profile.volcano;
-  if (!v) return '';
+  if (!v) {
+    if (!profile.contextPending) return '';
+    return `<section class="panel-section"><div class="section-head"><h3>Volcanic context</h3><span class="fine">loading…</span></div><p class="fine">Fetching the nearest Smithsonian Holocene volcanic center. Proximity is context only and does not affect the score.</p></section>`;
+  }
   return `<section class="panel-section">
     <div class="section-head"><h3>Volcanic context</h3><span class="fine">Smithsonian GVP</span></div>
     <p><strong>${esc(v.name)}</strong> · ${Math.round(v.distanceKm)} km away · ${esc(v.type || 'volcanic center')}</p>

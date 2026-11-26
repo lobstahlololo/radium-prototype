@@ -519,24 +519,20 @@ export function terrainFromElevations(centerLat, elevations, dLatDeg, dLonDeg, s
   };
 }
 
-/** Full Earth profile for one point: climate, multi-scale terrain and optional context. */
-export async function buildEarthProfile(analog, { detailed = false, includeContext = false } = {}) {
+/** Core Earth profile: climate and multi-scale terrain, the inputs used by the score. */
+export async function buildEarthProfileCore(analog, { detailed = false } = {}) {
   const plan = terrainScalePlan(detailed);
   const grids = plan.map((scale) => ({
     ...scale,
     ...terrainSamplePoints(analog.lat, analog.lon, scale.spacingKm),
   }));
   const allPoints = grids.flatMap((grid) => grid.points);
-  const [elevationResult, climateResult, soilResult, volcanoResult] = await Promise.all([
+  const [elevationResult, climateResult] = await Promise.all([
     fetchElevations(allPoints).catch((error) => ({ error })),
     fetchClimate(analog.lat, analog.lon).catch((error) => ({ error })),
-    includeContext ? fetchSoil(analog.lat, analog.lon).catch((error) => ({ error })) : Promise.resolve(null),
-    includeContext ? fetchVolcanoContext(analog.lat, analog.lon).catch((error) => ({ error })) : Promise.resolve(null),
   ]);
 
   const climate = climateResult && !climateResult.error ? climateResult : null;
-  const soil = soilResult && !soilResult.error ? soilResult : null;
-  const volcano = volcanoResult && !volcanoResult.error ? volcanoResult : null;
   const terrains = {};
   if (elevationResult && !elevationResult.error) {
     let offset = 0;
@@ -559,16 +555,6 @@ export async function buildEarthProfile(analog, { detailed = false, includeConte
     terrain: terrain
       ? { ok: true, source: terrain.elevationSource, detail: `${grids.length} sampling scale${grids.length === 1 ? '' : 's'}` }
       : { ok: false, error: elevationResult?.error?.message || 'unknown elevation service error' },
-    ...(includeContext
-      ? {
-          soil: soil
-            ? { ok: true, source: soil.source, detail: `${soil.textureClass || 'texture unavailable'} · ${soil.depth}` }
-            : { ok: false, error: soilResult?.error?.message || 'unknown SoilGrids error' },
-          volcano: volcano
-            ? { ok: true, source: volcano.source, detail: `${volcano.name} · ${Math.round(volcano.distanceKm)} km` }
-            : { ok: false, error: volcanoResult?.error?.message || 'unknown volcano catalog error' },
-        }
-      : {}),
   };
   const issues = [];
   if (!climate) issues.push(`Climate normals unavailable: ${dataStatus.climate.error}`);
@@ -580,13 +566,51 @@ export async function buildEarthProfile(analog, { detailed = false, includeConte
     terrainFine: terrains.fine || null,
     terrainBroad: terrains.broad || null,
     terrainSource: terrain?.elevationSource || null,
-    soil,
-    volcano,
     dataStatus,
     experimental: analog.id === 'custom-earth-point',
     fetchedAt: new Date().toISOString(),
     dataIssue: issues.length ? issues.join(' ') : null,
   };
+}
+
+/** Loads context-only SoilGrids and Smithsonian data; neither changes the score. */
+export async function fetchEarthContext(lat, lon) {
+  const [soilResult, volcanoResult] = await Promise.all([
+    fetchSoil(lat, lon).catch((error) => ({ error })),
+    fetchVolcanoContext(lat, lon).catch((error) => ({ error })),
+  ]);
+  const soil = soilResult && !soilResult.error ? soilResult : null;
+  const volcano = volcanoResult && !volcanoResult.error ? volcanoResult : null;
+  return {
+    soil,
+    volcano,
+    dataStatus: {
+      soil: soil
+        ? { ok: true, source: soil.source, detail: `${soil.textureClass || 'texture unavailable'} · ${soil.depth}` }
+        : { ok: false, error: soilResult?.error?.message || 'unknown SoilGrids error' },
+      volcano: volcano
+        ? { ok: true, source: volcano.source, detail: `${volcano.name} · ${Math.round(volcano.distanceKm)} km` }
+        : { ok: false, error: volcanoResult?.error?.message || 'unknown volcano catalog error' },
+    },
+  };
+}
+
+/** Merges asynchronous context into an already-rendered core profile. */
+export function mergeEarthContext(profile, context) {
+  return {
+    ...profile,
+    soil: context.soil || null,
+    volcano: context.volcano || null,
+    dataStatus: { ...profile.dataStatus, ...(context.dataStatus || {}) },
+    contextPending: false,
+  };
+}
+
+/** Full Earth profile for one point, with optional context loaded in the same promise. */
+export async function buildEarthProfile(analog, { detailed = false, includeContext = false } = {}) {
+  const profile = await buildEarthProfileCore(analog, { detailed });
+  if (!includeContext) return profile;
+  return mergeEarthContext(profile, await fetchEarthContext(analog.lat, analog.lon));
 }
 
 /** Builds profiles for the whole pool with limited concurrency and progress callbacks. */
